@@ -1,0 +1,403 @@
+=== Church Website Connector ===
+Requires at least: 7.0
+Requires PHP: 8.3
+Stable tag: 1.5.0
+License: GPL-2.0-or-later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+
+One reusable WordPress plugin for GeneratePress AI, WP Rocket and protected
+website tools through MCP. It adds PDF uploads, page/post/media metadata tools,
+optional Redirection management and Used CSS clearing. Install the same ZIP on
+each compatible website; no site-specific code or ZIP rebuild is needed.
+
+== Connection options ==
+
+With the optional GeneratePress OAuth bridge enabled, use the native GeneratePress
+AI MCP server as a single primary connection for GeneratePress authoring, enabled
+Church Website Connector tools and the allowlisted WP Rocket tools. Complete the
+native GeneratePress sign-in and consent. A separate WP Rocket OAuth sign-in is
+not needed for those tools through this connection.
+
+The bridge supports GeneratePress AI >=1.0.0 <1.1.0. It defaults off on a new
+installation and on upgrade from a version without the option; updating preserves
+an existing choice. Enable it explicitly in Settings > Website Connector after
+reviewing the website's authorised GeneratePress clients. Only the fixed list of
+registered, MCP-public abilities is added. Native account permissions, feature
+switches and each tool's operation checks still apply.
+
+Without the bridge, use GeneratePress and WP Rocket as separate native OAuth
+connections. GeneratePress supplies its authoring tools; the WP Rocket gateway
+supplies its native cache tools and the enabled connector tools. This remains an
+alternative setup, rather than a requirement for the single primary connection.
+
+Settings > Website Connector supplies both native MCP addresses and the
+GeneratePress authorisation-server metadata address. Its copyable setup message
+reflects whether the compatible bridge is enabled. Readiness checks do not prove
+that sign-in, client discovery or an upload has completed successfully.
+
+== Installation and updates ==
+
+1. Open Plugins > Add Plugin > Upload Plugin in WordPress. Upload the ZIP and
+   activate it as an administrator, or replace the installed version when updating.
+2. Open Settings > Website Connector. Resolve any missing or inactive dependencies
+   shown there, including GeneratePress AI setup and licence activation.
+3. Choose the connection helpers for this website. For the single primary
+   GeneratePress connection, review existing authorised clients, select
+   "Use one GeneratePress connection for the enabled connector and WP Rocket tools"
+   and save the settings.
+4. Copy the setup message from that page into your website project chat. Reuse an
+   existing connection for this exact website where available. A new connection
+   needs native website sign-in and consent. Keep passwords, tokens and licence
+   keys out of chat and project files.
+5. Ask the assistant to verify the exact website with
+   church-connector/connection-status, then discover the tools needed for the task.
+   After updating, refresh the connection or restart an already-open client if it
+   retains an old tool list. Verify again after restarting.
+
+Opening the setup page or reading status does not edit content, upload files or
+clear caches. Those actions require their own authorised task. Where compatible
+Used CSS services are available, saving settings can grant only the current
+eligible administrator the connector's separate Used CSS clearing permission.
+
+Activation enables the standard connection helpers on the saved website addresses.
+Redirection and the GeneratePress bridge require their separate opt-ins. Settings
+can disable individual features. Reactivation on the same installation preserves
+saved choices. The plugin binds to WordPress's saved HTTPS Site Address and
+WordPress Address, not the request Host header or a client-supplied URL. A copied
+database or changed address pauses the helpers until an administrator re-enables
+them for the new installation.
+
+This is an independent GPL plugin, not an official GeneratePress or WP Rocket
+product. Its public source and releases are at:
+https://github.com/krystoflp/church-website-connector
+Changes in vendor interfaces may need a connector update.
+
+== Automatic updates ==
+
+Install version 1.5.0 or newer once, then open Plugins > Installed Plugins and
+choose Enable auto-updates for Church Website Connector. WordPress handles later
+updates on its normal schedule, subject to hosting policy and working scheduled
+tasks. The site's administrator can disable auto-updates using the same control.
+Existing connector settings, connections and feature choices are retained.
+
+The connector checks published stable GitHub releases; drafts, prereleases,
+unpublished tags and development branches are not update sources. Each release
+must include its versioned plugin ZIP and matching JSON metadata with compatibility
+requirements and a SHA-256 checksum. Incomplete or malformed releases are rejected,
+and the downloaded ZIP is checked before WordPress installs it. Update checks are
+cached for 12 hours; failed checks are cached briefly. If GitHub is unavailable,
+the currently installed connector continues running.
+
+Checks use GitHub's public HTTPS endpoints without GitHub credentials or a
+WordPress sign-in. Ordinary web requests reveal the server IP and the connector's
+User-Agent version; no website address, content or connection credentials are sent.
+No WordPress roles, provider grants or auto-update preferences are changed by the
+updater. Vendor plugin updates remain managed by their own update systems.
+
+== Dependencies and compatibility ==
+
+* PHP 8.3 or newer and single-site WordPress 7.0 or newer with the Abilities API.
+* HTTPS Site Address and WordPress Address on the same DNS host, without custom
+  ports. Different paths on that host, including subdirectory sites, are supported.
+* GeneratePress AI, an active GeneratePress One licence and GenerateBlocks 2.3 or
+  newer. Pro authoring needs the corresponding licensed plugins.
+* A compatible MCP Adapter. GeneratePress AI 1.0.0 requires 0.6.1 or newer. A
+  compatible bundled adapter can satisfy this; a duplicate plugin is not needed.
+* An active licensed WP Rocket release. The connector also checks for WP Rocket's
+  native MCP OAuth library. That library supports the separate WP Rocket gateway;
+  its presence does not mean the primary GeneratePress connection uses WP Rocket
+  sign-in. No additional third-party OAuth plugin is bundled or required.
+* The optional GeneratePress bridge supports GeneratePress AI 1.0.x and its native
+  OAuth/MCP classes. Unsupported versions pause that bridge.
+* Used CSS clearing supports WP Rocket >=3.24 <3.25 with Remove Unused CSS enabled.
+  Other versions pause that operation pending compatibility review.
+* Optional Redirection tools support Redirection >=5.10.1 <5.11 and the required
+  native interfaces; tested on 5.10.1. Other versions pause those tools.
+
+Missing dependencies and identifiable outdated adapters produce administrator
+warnings. Dependencies, commercial licences and vendor MCP servers are not bundled
+or replaced. Local readiness, the client’s OAuth support, native sign-in and the
+connected account's permissions must all be checked on the intended website.
+
+== Authentication and access ==
+
+The primary connection uses GeneratePress AI's native OAuth flow. GeneratePress AI
+1.0.x issues a non-expiring, individually revocable key for its MCP endpoint. Keep
+it in macOS Keychain or the client's secure credential store. Revoke unused access
+in Settings > GeneratePress AI. Enabling the bridge extends the tool list for
+EVERY authorised GeneratePress AI client on that website, including existing
+connections. It does not grant new WordPress roles or bypass target permissions.
+
+The alternative WP Rocket connection uses WP Rocket's own sign-in, consent,
+token and renewal handling. Its credentials are separate from GeneratePress's.
+The optional Codex helper adds only the exact official client identity through
+WP Rocket's native trust filter:
+https://chatgpt.com/oauth/codex/client.json
+
+This identity represents the shared Codex application, not a person, device,
+project or chat. Trust permits sign-in requests, not automatic website access.
+Each connection still requires an authorised WordPress account and native consent.
+Other chats with access to an authorised connection can use its permissions; this
+plugin does not enforce project isolation. It does not store WordPress passwords
+or copy provider credentials into project files.
+
+The discovery compatibility helper yields only the two exact root discovery
+documents already handled by WP Rocket, with or without trailing slash. It leaves
+GeneratePress's namespaced discovery and both native authentication providers
+intact. The bridge uses GeneratePress's supported ability-list filter; it does not
+replace OAuth, re-register vendor callbacks or expose arbitrary abilities.
+
+The tested client is native Codex desktop. ChatGPT web and other clients must
+support the relevant provider's OAuth flow; browser ChatGPT sign-in is not claimed
+verified. Codex trust does not automatically trust a different client. Do not
+weaken client verification to work around an authentication error.
+
+Disabling the bridge removes its extra tools; it does not revoke native keys.
+Deactivating or uninstalling the connector does not revoke access previously
+issued by either provider. Use each provider's own connection controls to revoke
+its authorisations.
+
+== PDF uploads ==
+
+church-connector/upload-pdf uploads an actual local PDF to the Media Library
+through the selected website connection. Enable the checkbox labelled
+"Enable page, post and media details and PDF uploads through this website connection".
+The connected user needs the native upload_files capability. No separate REST
+password, role change or additional sign-in is needed.
+
+The settings page shows PDF upload readiness for the current administrator and
+the effective website size limit. This is a local permission/readiness check,
+not proof that a client has discovered the tool or completed an upload.
+
+Supply the exact bound site_url, a PDF filename and canonical data_base64 read
+from the file itself. Do not supply a local path, data URL or remote download URL.
+The maximum decoded size is 10 MiB (10,485,760 bytes), or the website's upload limit
+if lower. Hosting and client request limits may be lower still.
+
+Checks cover safe filenames, canonical base64, the PDF header/end marker, fileinfo
+MIME where available and the WordPress MIME allowlist. One fixed internal POST to
+/wp/v2/media preserves native core REST permissions and upload policy filters.
+Saved bytes are verified against the original using byte count and SHA-256.
+These are file-type/integrity checks, not a full PDF parser or malware scan.
+
+Optional title, caption and description are plain text. attach_to must identify
+an existing non-attachment/non-revision post the account can edit; this can be a
+page or post. The result includes attachment_id, the public file URL, saved
+filename, MIME type, byte count and SHA-256. Existing image upload tools are
+unchanged.
+
+An authorised new PDF upload creates a public Media Library attachment directly;
+it does not use an existing-item metadata preview token. Later edits to supported
+attachment details use the metadata read/preview/apply workflow below. Repeating
+an upload creates a new attachment, so inspect the Media Library before retrying
+an uncertain result.
+The tool does not publish pages, change account grants or clear caches. Uploaded
+PDFs remain in the Media Library if the connector is uninstalled.
+
+== Page, post and media metadata ==
+
+The metadata tools are church-connector/rest-capabilities, get-item-details,
+preview-item-update, apply-item-update and discard-item-update. All tool names
+use the church-connector/ prefix. They are available through the primary
+GeneratePress connection when the bridge is enabled, or the alternative native
+WP Rocket gateway. These tools are enabled by default on an enabled installation,
+including updates from 1.0.0. The settings checkbox for page, post and media details
+and PDF uploads controls both metadata tools and PDF uploads.
+
+Supported page/post details include title, excerpt where supported, slug, featured
+image, comments/pings, categories/tags for posts and parent/order for pages.
+Existing media supports plain-text title, alt text, caption and description.
+The fields returned by get-item-details are authoritative for that item's core
+REST controller. Use GeneratePress for block content and draft authoring.
+
+Read the item and use its current state_hash when creating a preview. Preview
+returns a normalised before/after diff without updating the item. Review it before
+applying that account's preview_token with approved=true. The token expires after
+15 minutes; a changed item requires a fresh read and preview. One pending metadata
+preview is retained per account, separately from Redirection previews.
+
+Apply rechecks native permissions, exact website identity, expiry and the latest
+item state. Only the token hash is stored; a conditional claim consumes the exact
+preview before writing. A new preview replaces the previous one. Previews can be
+discarded, and WordPress cron removes expired records. Per-item locks serialise
+connector writes; unrelated WordPress editors are checked optimistically.
+
+Internal rest_do_request calls retain the signed-in WordPress user, native REST
+validation, sanitisation, permission callbacks and relevant policy filters. Only
+fixed core routes and declared metadata fields are used. Content, publication
+status, scheduling, author, arbitrary meta, users, plugins and settings are outside
+this metadata write allowlist. No arbitrary URL/route proxy is provided.
+
+Native filters can normalise values, and an error may follow a partial change.
+Inspect the returned item/error before retrying. The bounded metadata audit keeps
+50 results with UTC time, user ID, item, changed field names and outcome, without
+tokens or text values. Disabling REST-backed tools also closes direct callbacks.
+These tools schedule no cache clears; ordinary native update hooks still apply.
+
+== Redirection through MCP ==
+
+The optional tools are redirection-capabilities, list-redirections, get-redirection,
+list-redirection-groups, preview-redirection-change, apply-redirection-change and
+discard-redirection-change, all prefixed church-connector/. Enable Redirection in
+Settings > Website Connector. It defaults off when not previously configured;
+updates preserve the saved choice. Use the primary GeneratePress connection
+with the bridge enabled, or the alternative WP Rocket gateway. Native Redirection
+permissions are still required.
+
+Read rules and WordPress-module groups; create, edit, enable, disable or permanently
+delete one plain URL-to-URL rule at a time. Editable fields include source/target,
+title, HTTP code, group/order, case/trailing-slash matching and query mode: exact,
+exactorder, ignore (drop) or pass (forward). Regex and conditional-rule editing,
+group writes, visitor logs, plugin settings and global actions remain in the native
+editor. Internal calls use only fixed native REST routes.
+
+Ignore/pass still require any query constraints specified in the source, while
+permitting extra incoming values. exactorder retains native order-sensitive rule
+selection, so query-order-only redirects remain available.
+
+Read the affected rule and use its state_hash for a preview. Creation omits
+id/state_hash and supplies source, target and an existing group_id. Review the
+concrete diff before applying the 15-minute, single-use, owner-bound token.
+Permanent deletion has no undo and requires explicit confirmation. Apply rechecks
+permissions, website, expiry, rule and group, then verifies the stored result.
+Traffic counts do not invalidate previews. A website-level lock serialises
+connector redirect writes; unrelated native editors are checked optimistically.
+
+Before preview and apply, native case, trailing-slash and query matching checks
+plain source overlaps. Browser dot segments, encoded paths, query order and query
+forwarding are checked for self loops and local cycles among active plain rules.
+Disabled rules are included in overlap checks. These checks make no external HTTP
+requests and are bounded to 1,000 rules, 200 WordPress groups, 20 chain hops and
+20,000 matching checks. Exceeding a limit refuses the change; use the native editor.
+
+Regex/conditional rules, dynamic target transformations, external domain aliases,
+other plugins and web-server redirects are outside this analysis. The checks do
+not guarantee that every possible redirect loop is prevented. A write error may
+follow a partial change; inspect the result before retrying.
+
+The audit retains 50 outcomes with time, user, operation, ID and field names,
+without tokens, URL values or visitor data. Existing redirects survive uninstall.
+These tools clear neither page cache nor Used CSS. Use the website's WP Rocket
+tools separately when needed. No automatic timed redirect or front-end layout
+change is introduced.
+
+== Used CSS ==
+
+church-connector/used-css-status is read-only; church-connector/clear-used-css
+changes generated CSS and associated page cache. Both use the primary GeneratePress
+connection with the bridge enabled, or the alternative native WP Rocket gateway.
+Reading connection-status or used-css-status does not clear anything.
+
+An eligible administrator can receive church_connector_clear_used_css when the
+helper is enabled with compatible native services. Clearing also requires both
+manage_options and rocket_remove_unused_css. Other administrators are not granted
+access automatically; an eligible administrator can save settings to obtain their
+own grant. Execution rechecks permissions and readiness.
+
+Prefer the smallest scope: a published, non-password-protected page/post ID.
+The request must identify the exact bound website; canonical addresses must stay
+on that HTTPS host and within its base path. Arbitrary URL input is rejected.
+Whole-site clearing requires scope=site and confirm_site=true, plus explicit user
+authorisation. Scope/approval flags are client acknowledgements, not independent
+proof of human consent on the website. They do not replace native permissions.
+
+The operation uses an atomic lock, a 60-second cooldown and a local audit of the
+last 50 executions: UTC time, user ID, scope, URL and result. This connector sends
+no telemetry. Failure may follow partial clearing; inspect before retrying. Used
+CSS regeneration is asynchronous and must be verified separately. Clearing page
+cache alone does not clear Used CSS.
+
+The manual operation is under Tools > Church Website Used CSS. The connector does
+not schedule clearing or trigger it automatically after content edits.
+
+== Existing helpers, rollback and uninstall ==
+
+When an older all-saints-used-css or church-toolkit-used-css helper is active,
+the connector waits before advertising replacement Used CSS abilities. Keep an
+administrator browser session open, deactivate the older CSS helper, then save
+Website Connector settings and verify the replacement's read-only status through
+the intended connection. Retain the original ZIP and plugin until verified.
+A clearing test requires separate authorisation.
+
+The old discovery/trusted-client helper can be deactivated after the replacement
+and native sign-in discovery are verified. Preserve a working recovery session
+and sign-in path during migration. Before changing between connection providers,
+verify the replacement connection and required tools before retiring the old one.
+
+To roll back an update, use the previous connector ZIP from an administrator
+session, then verify the configured connection. If reverting to the older separate
+helpers, review which bridge tools will disappear before deactivating this plugin.
+Uninstall removes only connector settings, recorded Used CSS grants, previews,
+locks, cooldowns, audits and expiry events. It preserves uploaded PDFs, other media,
+page/post content, redirects, legacy-helper data, native licences and provider
+credentials. Native authorisations must be revoked through their own providers.
+
+== Changelog ==
+
+= 1.5.0 =
+* Add WordPress-native updates from published stable GitHub releases.
+* Verify release identity, compatibility metadata and downloaded ZIP integrity.
+* Preserve native administrator auto-update choices and existing connection settings.
+
+= 1.4.1 =
+* Refresh Website Connector settings wording for the primary GeneratePress
+  connection and the separate WP Rocket alternative, including the setup message.
+* Distinguish the installed WP Rocket connection library from completed sign-in.
+* Show PDF upload readiness and the current size limit. Explain public files,
+  optional metadata, returned links and the difference from metadata previews.
+* Preserve saved settings, authentication, permissions and tool operations.
+* Align this readme with the current checkbox labels and connection-reuse message;
+  clarify PDF readiness and the difference from existing-item metadata previews.
+
+= 1.4.0 =
+* Add church-connector/upload-pdf through existing MCP authentication and native
+  WordPress upload permissions, including the GeneratePress bridge allowlist.
+* Validate PDF filenames, canonical base64, file type and size up to 10 MiB;
+  preserve WordPress upload policy checks and verify saved bytes with SHA-256.
+* Support plain-text PDF metadata and attachment to an editable post/page;
+  return the attachment ID and public URL without publishing pages or clearing
+  caches. Existing image upload tools are unchanged.
+* Add PDF readiness to connection status and verify uploads, size boundaries,
+  invalid-input rejection, native permissions and existing connector behaviour.
+* Refresh this readme throughout: document the single GeneratePress connection,
+  retain separate WP Rocket sign-in as an alternative and place PDF guidance
+  before the changelog. This documentation correction changes no PHP code.
+
+= 1.3.1 =
+* Repair WP Rocket 3.24 settings tool enum formatting through the native ability
+  registration filter on the enabled, bound-site GeneratePress bridge. Preserve
+  native allowed values, callbacks and permissions.
+
+= 1.3.0 =
+* Add an optional fixed allowlist of existing connector and WP Rocket tools to
+  the native GeneratePress AI OAuth endpoint. Defaults off; native permissions
+  remain unchanged.
+* Explain non-expiring GeneratePress keys and the effect on every authorised
+  client at that endpoint. Review existing connections before enabling.
+
+= 1.2.1 =
+* Reject equivalent-source conflicts and encoded/query/dot-segment self loops.
+* Check bounded local plain-rule chains, including forwarded query values, at
+  preview and again at apply, before consuming the single-use preview.
+* Ignore native last-selected-group display state when checking stale previews.
+* Restrict Redirection compatibility to >=5.10.1 <5.11 with interface checks.
+* Display optional Redirection readiness and warn when enabled but unavailable.
+* Clarify shared Codex client identity, account authorisation and approval flags.
+
+= 1.2.0 =
+* Add optional Redirection management through the existing MCP connection.
+* Add dedicated read, preview, apply and discard tools with native REST
+  permissions, single-use owner-bound approvals, stale-state checks and read-back.
+* Add fixed single-rule operations and a separate administrator feature toggle.
+
+= 1.1.0 =
+* Add REST-backed page/post and media metadata tools through existing MCP sign-in.
+* Add permission-checked reads, concrete previews, owner-bound single-use approval
+  tokens, stale-state checks and a bounded audit.
+* Support portable installation with generic tool names and saved site identity.
+
+= 1.0.0 =
+* One site-independent installation ZIP with native connection setup information.
+* Dependency warnings, exact Codex trust and focused discovery compatibility.
+* Protected Used CSS abilities, status, manual tool and safe legacy-helper checks.
+* PHP 8.3 minimum, administrator-only setup and exact activation-time site binding.
