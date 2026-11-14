@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.7.0
+Stable tag: 1.7.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -120,6 +120,14 @@ connector does not enable its auto-updates, delete it on uninstall, or install
 The SEO Framework, Rank Math, Code Snippets, WS Form Pro or commercial licences.
 
 == Automatic updates ==
+
+From 1.7.1, Settings → Website Connector → Automatic updates includes Check for
+updates now. This makes a fresh GitHub check, bypassing the success/failure cache,
+and refreshes only this plugin’s WordPress update information. It does not install
+an update. Use Update now on Installed Plugins when you want to install it.
+A failed check reports an error and preserves the previous WordPress update offer.
+The button requires settings and plugin-update permissions and a valid form nonce.
+
 
 Install version 1.5.0 or newer once, then open Plugins > Installed Plugins and
 choose Enable auto-updates for Church Website Connector. WordPress handles later
@@ -463,6 +471,10 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.7.1 =
+* Add an administrator-only Check for updates now button in Settings → Website Connector. It bypasses the GitHub cache and refreshes the connector’s WordPress update information without installing an update.
+* Report available, current, incompatible and failed checks; preserve settings, automatic-update choices and other plugins’ update information.
 
 = 1.7.0 =
 * Preselect the single GeneratePress method for new setups, confirmed on the first settings save; preserve existing connection choices.

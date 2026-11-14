@@ -88,3 +88,16 @@ Published source and packages are public. Only authorised repository maintainers
 can publish releases. Sites need no GitHub account or access token to update.
 
 GPL-2.0-or-later. See [LICENSE](LICENSE).
+
+## Immediate update checks (1.7.1)
+
+In **Settings → Website Connector → Automatic updates**, select **Check for updates
+now**. The nonce-protected administrator action bypasses both successful and failed
+GitHub caches and refreshes only the connector’s native WordPress update entry.
+It reports whether a stable update is available, the installed version is current
+or newer, requirements are incompatible, or the check failed. It does not install
+anything; use **Update now** on **Installed Plugins** to install an available update.
+Other plugin update entries, their check schedule, connector settings and automatic
+update preferences are preserved. Failed checks keep the previous WordPress update
+information. The button requires both settings and plugin-update permissions and
+appears once the website has installed 1.7.1 or newer.
