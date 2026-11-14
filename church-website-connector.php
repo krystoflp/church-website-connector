@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Church Website Connector
  * Description: Prepares GeneratePress AI and WP Rocket connections, allows the official Codex client, and adds protected Used CSS, PDF upload, REST-backed metadata and Redirection management tools through MCP.
- * Version: 1.7.2
+ * Version: 1.7.3
  * Requires at least: 7.0
  * Requires PHP: 8.3
  * Author: Church Website Toolkit
@@ -17,7 +17,7 @@ namespace ChurchWebsiteConnector;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION  = '1.7.2';
+const VERSION  = '1.7.3';
 const SETTINGS = 'church_website_connector_settings';
 
 function settings(): array {
@@ -164,6 +164,9 @@ function activate( $network_wide = false ): void {
 	if ( is_wp_error( $result ) ) {
 		wp_die( esc_html( $result->get_error_message() ) );
 	}
+	if ( ! $saved ) {
+		Maintenance\initial_auto_update( Updates\plugin_file() );
+	}
 	if ( ! $same_site ) {
 		AdapterSetup\schedule();
 	}
@@ -179,6 +182,7 @@ require_once __DIR__ . '/includes/integration-tools.php';
 require_once __DIR__ . '/includes/adapter-setup.php';
 require_once __DIR__ . '/includes/admin.php';
 require_once __DIR__ . '/includes/updates.php';
+require_once __DIR__ . '/includes/maintenance.php';
 
 register_activation_hook( __FILE__, __NAMESPACE__ . '\\activate' );
 add_action( 'admin_menu', __NAMESPACE__ . '\\admin_menu' );

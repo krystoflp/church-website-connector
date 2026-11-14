@@ -42,6 +42,47 @@ function status(): array {
 	);
 }
 
+/** Presentation state; actual native readiness stays separate until the next request. */
+function presentation(): array {
+	$native = status();
+	if ( $native['compatible'] || $native['available'] ) {
+		return array(
+			'level'   => $native['compatible'] ? 'success' : 'warning',
+			'message' => $native['message'],
+		);
+	}
+	$state = get_option( STATE, array() );
+	$same  = is_array( $state ) && ( $state['site'] ?? null ) === Connector\current_identity();
+	if ( $same && 'failed' === ( $state['status'] ?? '' ) ) {
+		return array(
+			'level'   => 'warning',
+			'message' => (string) ( $state['message'] ?? __( 'Adapter setup failed. Review the Plugins screen before retrying.', 'church-website-connector' ) ),
+		);
+	}
+	if ( $same && 'complete' === ( $state['status'] ?? '' ) ) {
+		return array(
+			'level'   => 'info',
+			'message' => __( 'MCP Adapter setup completed. Reload this page to check its active interfaces.', 'church-website-connector' ),
+		);
+	}
+	if ( $same && 'running' === ( $state['status'] ?? '' ) ) {
+		return array(
+			'level'   => 'info',
+			'message' => __( 'MCP Adapter setup was started. Reload to check the result before retrying an interrupted request.', 'church-website-connector' ),
+		);
+	}
+	if ( automatic_allowed() && ! is_wp_error( permission() ) ) {
+		return array(
+			'level'   => 'info',
+			'message' => __( 'MCP Adapter will be installed or activated automatically when you open Website Connector settings.', 'church-website-connector' ),
+		);
+	}
+	return array(
+		'level'   => 'warning',
+		'message' => $native['message'],
+	);
+}
+
 /** Queue one initial setup attempt, scoped to this configured website. */
 function schedule(): void {
 	update_option(
@@ -130,7 +171,8 @@ function run( bool $automatic = false ) {
 		require_once ABSPATH . 'wp-admin/includes/plugin-install.php';
 		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 
-		$plugins = get_plugins();
+		$plugins         = get_plugins();
+		$newly_installed = false;
 		if ( ! isset( $plugins[ PLUGIN_FILE ] ) ) {
 			if ( 'direct' !== get_filesystem_method( array(), WP_PLUGIN_DIR ) ) {
 				return finish( 'failed', __( 'WordPress needs filesystem credentials to install plugins. Use the manual WordPress installation link below.', 'church-website-connector' ) );
@@ -155,6 +197,7 @@ function run( bool $automatic = false ) {
 			if ( true !== $installed || $skin->get_errors()->has_errors() ) {
 				return finish( 'failed', __( 'WordPress could not install MCP Adapter. Check available disk space and plugin-folder permissions, then retry or install it manually.', 'church-website-connector' ) );
 			}
+			$newly_installed = true;
 			wp_clean_plugins_cache();
 			$plugins = get_plugins();
 		}
@@ -164,6 +207,9 @@ function run( bool $automatic = false ) {
 		$requirements = validate_plugin_requirements( PLUGIN_FILE );
 		if ( is_wp_error( $requirements ) ) {
 			return finish( 'failed', $requirements->get_error_message() );
+		}
+		if ( $newly_installed ) {
+			Connector\Maintenance\initial_auto_update( PLUGIN_FILE );
 		}
 		$activated = activate_plugin( PLUGIN_FILE, '', false, false );
 		if ( is_wp_error( $activated ) ) {
@@ -203,18 +249,14 @@ function render(): void {
 	if ( status()['compatible'] ) {
 		return;
 	}
-	$state     = get_option( STATE, array() );
-	$permitted = ! is_wp_error( permission() );
-	$automatic = $permitted && automatic_allowed();
-	echo '<div id="cwc-adapter-setup" data-url="' . esc_url( admin_url( 'admin-ajax.php' ) ) . '" data-action="' . esc_attr( ACTION ) . '" data-nonce="' . esc_attr( wp_create_nonce( ACTION ) ) . '" data-automatic="' . esc_attr( $automatic ? '1' : '0' ) . '" data-running="' . esc_attr__( 'Setting up MCP Adapter. Please wait.', 'church-website-connector' ) . '" data-failure="' . esc_attr__( 'The request did not return a result. Reload this page and inspect the Plugins screen before retrying.', 'church-website-connector' ) . '">';
+	$permitted    = ! is_wp_error( permission() );
+	$automatic    = $permitted && automatic_allowed();
+	$presentation = presentation();
+	$installed    = defined( 'WP_PLUGIN_DIR' ) && is_file( WP_PLUGIN_DIR . '/' . PLUGIN_FILE );
+	$running      = $installed ? __( 'Activating MCP Adapter automatically. Please wait.', 'church-website-connector' ) : __( 'Installing MCP Adapter automatically. Please wait.', 'church-website-connector' );
+	echo '<div id="cwc-adapter-setup" data-url="' . esc_url( admin_url( 'admin-ajax.php' ) ) . '" data-action="' . esc_attr( ACTION ) . '" data-nonce="' . esc_attr( wp_create_nonce( ACTION ) ) . '" data-automatic="' . esc_attr( $automatic ? '1' : '0' ) . '" data-running-automatic="' . esc_attr( $running ) . '" data-running="' . esc_attr__( 'Installing or activating MCP Adapter. Please wait.', 'church-website-connector' ) . '" data-failure="' . esc_attr__( 'The request did not return a result. Reload this page and inspect the Plugins screen before retrying.', 'church-website-connector' ) . '">';
 	echo '<p id="cwc-adapter-progress" role="status" aria-live="polite">';
-	if ( 'running' === ( $state['status'] ?? '' ) ) {
-		echo esc_html__( 'Adapter setup was started. Reload this page to check the result, or retry if the previous request was interrupted.', 'church-website-connector' );
-	} elseif ( isset( $state['message'] ) && ( $state['site'] ?? null ) === Connector\current_identity() ) {
-		echo esc_html( $state['message'] );
-	} else {
-		echo esc_html__( 'New setups automatically install or activate the separate WordPress.org MCP Adapter here when no compatible adapter is available. Other plugins and their licences are not installed.', 'church-website-connector' );
-	}
+	echo esc_html( $presentation['message'] );
 	echo '</p>';
 	if ( $permitted ) {
 		echo '<p><button type="button" id="cwc-adapter-retry" class="button" aria-describedby="cwc-adapter-progress">' . esc_html__( 'Set up MCP Adapter', 'church-website-connector' ) . '</button> ';

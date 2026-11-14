@@ -44,3 +44,7 @@ if ( function_exists( 'wp_unschedule_hook' ) ) {
 foreach ( array( 'church_connector_adapter_setup', 'church_connector_adapter_setup_lock' ) as $option ) {
 	delete_option( $option );
 }
+
+foreach ( array( 'church_connector_update_status', 'church_connector_auto_default_connector', 'church_connector_auto_default_adapter' ) as $option ) {
+	delete_option( $option );
+}

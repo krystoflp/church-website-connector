@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.7.2
+Stable tag: 1.7.3
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -116,10 +116,21 @@ Failures show a bounded explanation with retry/manual installation options;
 uncertain/interrupted results require inspecting Plugins before retrying.
 
 The adapter remains independent and has its own WordPress update controls. The
-connector does not enable its auto-updates, delete it on uninstall, or install
+connector enables its native auto-update preference once only when newly installed
+from connector 1.7.3 onward. It does not delete the adapter on uninstall or install
 The SEO Framework, Rank Math, Code Snippets, WS Form Pro or commercial licences.
 
 == Automatic updates ==
+
+From 1.7.3, a newly installed connector selects WordPress’s normal automatic-update
+preference once on first administrator activation. A separate MCP Adapter newly
+installed by the connector receives the same default after its package is
+validated. Existing connectors, existing adapters, upgrades, reactivation and
+later administrator changes keep their saved preference. You can disable updates
+on Installed Plugins at any time; the connector does not switch them back on.
+Website policy and plugin-update permissions can prevent the initial default;
+review the status panel and Installed Plugins if it could not be enabled.
+
 
 From 1.7.1, Settings → Website Connector → Automatic updates includes Check for
 updates now. This makes a fresh GitHub check, bypassing the success/failure cache,
@@ -131,7 +142,7 @@ From 1.7.2, the result appears at the top of the settings page after the refresh
 
 
 Install version 1.5.0 or newer once, then open Plugins > Installed Plugins and
-choose Enable auto-updates for Church Website Connector. WordPress handles later
+review the auto-update setting for Church Website Connector. Enable it if desired on an existing installation. WordPress handles later
 updates on its normal schedule, subject to hosting policy and working scheduled
 tasks. The site's administrator can disable auto-updates using the same control.
 Existing connector settings, connections and feature choices are retained.
@@ -473,6 +484,13 @@ credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
 
+= 1.7.3 =
+* Show informational MCP Adapter setup progress, synchronised across notices and readiness rows; warn only when setup fails or needs administrator action.
+* Enable native automatic updates once for a new connector installation and an MCP Adapter newly installed by it; preserve existing and later administrator choices.
+* Add a compact status panel with update-check history and automatic-update policy.
+* Add a credential-free diagnostic report, accessible copy control and native Site Health information.
+* Add Tools → Connector changes to read the existing bounded audit records without exposing URLs, code, content or form responses.
+
 = 1.7.2 =
 * Show update-check success, warning and error messages immediately below the Website Connector page heading so the result is visible after the page refreshes.
 
@@ -561,3 +579,36 @@ credentials. Native authorisations must be revoked through their own providers.
 * Dependency warnings, exact Codex trust and focused discovery compatibility.
 * Protected Used CSS abilities, status, manual tool and safe legacy-helper checks.
 * PHP 8.3 minimum, administrator-only setup and exact activation-time site binding.
+
+== Administrator status and diagnostics (1.7.3) ==
+
+The top status panel shows the installed and latest known stable connector
+versions, native auto-update preferences and policy, last release check, last
+successful check, primary connection and actionable compatibility issues. Opening
+settings makes local reads only; use Check for updates now for a fresh GitHub
+lookup. Update history stores timestamps, outcome and a validated version only.
+
+Pending MCP Adapter installation is informational. During the administrator setup
+request, notices and readiness rows show installation or activation progress.
+Confirmed success reloads the page to load the adapter’s native interfaces;
+failed, blocked or interrupted setup explains the action needed. Native readiness
+remains false until compatible interfaces are actually available. Other dependency
+warnings remain visible.
+
+The Diagnostic report on Settings → Website Connector has a labelled read-only
+field and Copy diagnostic report button, with keyboard-copy fallback. The same
+report is available in Tools → Site Health → Info → Church Website Connector.
+It contains only selected versions, readiness and helper flags, automatic-update
+policy, and release-check timestamps/outcome. Website addresses, passwords, keys,
+licence data, native error transcripts, account details, activity rows, code,
+website content and submitted responses are excluded. It is not sent anywhere
+automatically. Only administrators with manage_options may access it.
+
+Tools → Connector changes shows up to 50 existing recorded connector changes,
+newest first, with local time, WordPress account, helper, operation, item ID and
+result. It combines the existing metadata, Redirection, integration and Used CSS
+audit stores. Their existing limits of 50 entries per store remain unchanged;
+no second activity database is created. This is not a full WordPress activity
+log, and it excludes URLs, field values, code and form responses. Diagnostics do
+not include these activity records. Reading these screens does not edit content,
+clear caches, grant access or change update preferences.
