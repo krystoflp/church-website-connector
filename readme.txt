@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.7.3
+Stable tag: 1.7.4
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -389,8 +389,9 @@ These tools schedule no cache clears; ordinary native update hooks still apply.
 The optional tools are redirection-capabilities, list-redirections, get-redirection,
 list-redirection-groups, preview-redirection-change, apply-redirection-change and
 discard-redirection-change, all prefixed church-connector/. Enable Redirection in
-Settings > Website Connector. It defaults off when not previously configured;
-updates preserve the saved choice. Use the primary GeneratePress connection
+Settings > Website Connector. Version 1.7.4 enables this helper by default only
+on new installations. Updates, reactivation and older saved settings preserve
+the previous choice, including off. The separate Redirection plugin is still required. Use the primary GeneratePress connection
 with the bridge enabled, or the alternative WP Rocket gateway. Native Redirection
 permissions are still required.
 
@@ -483,6 +484,11 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.7.4 =
+* Enable Redirection management through MCP by default only on new installations; preserve existing settings and the required preview/approval workflow.
+* Keep the normal Installed Plugins auto-update enable/disable control available before a successful GitHub check, without forcing updates or changing saved preferences.
+
 
 = 1.7.3 =
 * Show informational MCP Adapter setup progress, synchronised across notices and readiness rows; warn only when setup fails or needs administrator action.

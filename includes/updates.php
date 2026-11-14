@@ -142,6 +142,15 @@ function compatible( array $release ): bool {
 		&& version_compare( (string) ( $GLOBALS['wp_version'] ?? '0' ), $release['requires'], '>=' );
 }
 
+/** Keep the native preference control available before a successful release lookup. */
+function supported_plugin( array $plugins ): array {
+	$file = plugin_file();
+	if ( isset( $plugins[ $file ] ) && ( $plugins[ $file ]['UpdateURI'] ?? '' ) === REPOSITORY ) {
+		$plugins[ $file ]['update-supported'] = true;
+	}
+	return $plugins;
+}
+
 /** Core chooses update/no_update and honours the site's automatic update opt-in. */
 function update_offer( $update, array $plugin_data, string $file, array $locales ) {
 	if ( plugin_file() !== $file || ( $plugin_data['UpdateURI'] ?? '' ) !== REPOSITORY ) {
@@ -351,6 +360,7 @@ function render_check(): void {
 
 add_action( 'admin_post_church_connector_check_updates', __NAMESPACE__ . '\\handle_check' );
 
+add_filter( 'all_plugins', __NAMESPACE__ . '\\supported_plugin' );
 add_filter( 'update_plugins_github.com', __NAMESPACE__ . '\\update_offer', 10, 4 );
 add_filter( 'plugins_api', __NAMESPACE__ . '\\plugin_information', 10, 3 );
 add_filter( 'upgrader_pre_download', __NAMESPACE__ . '\\verified_download', 10, 4 );

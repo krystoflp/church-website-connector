@@ -58,6 +58,14 @@ function fixture( $version = '1.5.1' ) {
     return [ $release, $metadata ];
 }
 check( ! isset( $GLOBALS['filters']['auto_update_plugin'] ), 'No forced auto-update preference' );
+$entries=[U\plugin_file()=>['UpdateURI'=>U\REPOSITORY,'Name'=>'Connector'],'other/other.php'=>['Name'=>'Other']];
+$GLOBALS['requests']=[];$requests_before=count($GLOBALS['requests']);
+$supported=U\supported_plugin($entries);
+check($supported[U\plugin_file()]['update-supported']===true&&$supported['other/other.php']===$entries['other/other.php'],'Native update support is declared only for the connector');
+check(count($GLOBALS['requests'])===$requests_before,'Declaring native update support performs no lookup');
+check(U\supported_plugin([])===[],'Inactive/unavailable entry is not invented');
+$entries[U\plugin_file()]['UpdateURI']='https://other.example';check(U\supported_plugin($entries)===$entries,'Another update source is not marked supported');
+
 check( $GLOBALS['filters']['update_plugins_github.com'][1] === 4 && $GLOBALS['filters']['upgrader_pre_download'][1] === 4, 'Native update and download hooks registered' );
 fixture();
 $offer = U\update_offer( false, [ 'UpdateURI' => U\REPOSITORY ], U\plugin_file(), [] );
