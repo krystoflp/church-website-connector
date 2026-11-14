@@ -12,12 +12,13 @@ SLUG = 'church-website-connector'
 
 def main():
     header = (ROOT / (SLUG + '.php')).read_text()
-    version = re.search(r"const VERSION = '([^']+)';", header).group(1)
+    version = re.search(r"const VERSION\s*=\s*'([^']+)';", header).group(1)
     assert re.fullmatch(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)', version)
     assert re.search(r'Version: ' + re.escape(version) + r'\s', header)
     assert 'Stable tag: ' + version + '\n' in (ROOT / 'readme.txt').read_text()
     files = [ROOT / name for name in [SLUG + '.php', 'uninstall.php', 'readme.txt', 'LICENSE']]
     files += sorted((ROOT / 'includes').glob('*.php'))
+    files += [ROOT / 'assets/setup.js']
     output = ROOT / 'dist'
     output.mkdir(exist_ok=True)
     archive = output / (SLUG + '-' + version + '.zip')

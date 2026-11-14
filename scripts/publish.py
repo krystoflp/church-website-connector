@@ -26,7 +26,7 @@ def main():
     revision = os.environ['GITHUB_SHA']
     assert re.fullmatch(r'[a-f0-9]{40}', revision)
     header = (ROOT / 'church-website-connector.php').read_text()
-    version = re.search(r"const VERSION = '([^']+)';", header).group(1)
+    version = re.search(r"const VERSION\s*=\s*'([^']+)';", header).group(1)
     assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version)
     tag = 'v' + version
     api = 'https://api.github.com/repos/' + REPO + '/releases'
