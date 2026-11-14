@@ -146,6 +146,7 @@ function connection_status( $input = array() ) {
 			'current_user_can_upload' => ! is_wp_error( PdfUpload\permission() ),
 			'max_bytes'               => min( PdfUpload\MAX_BYTES, wp_max_upload_size() ),
 		),
+		'imagify_pdf_protection'          => Configuration\pdf_protection_status(),
 		'generatepress_oauth_bridge'      => GeneratePressBridge\status(),
 		'redirection'                     => RedirectionTools\readiness(),
 		'integrations'                    => array_map( '\ChurchWebsiteConnector\Integrations\status', array_keys( Integrations\FLAGS ) ),
@@ -211,7 +212,7 @@ function admin_save(): void {
 		'enabled'       => true,
 		'setup_pending' => false,
 	);
-	foreach ( array( 'compatibility', 'codex', 'used_css', 'rest_tools', 'redirection_tools', 'generatepress_bridge', 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools' ) as $key ) {
+	foreach ( array( 'compatibility', 'codex', 'used_css', 'rest_tools', 'redirection_tools', 'generatepress_bridge', 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools', 'imagify_pdf_protection' ) as $key ) {
 		$flags[ $key ] = isset( $_POST[ $key ] ) && '1' === $_POST[ $key ];
 	}
 	$result = configure( $flags );
@@ -255,7 +256,7 @@ function admin_page(): void {
 	echo '<p><strong>Plugin version:</strong> ' . esc_html( VERSION ) . '</p>';
 	echo '<p><strong>Website:</strong> ' . esc_html( $status['current_site_url'] ) . '</p>';
 	if ( isset( $_GET['saved'] ) && '1' === $_GET['saved'] ) {
-		echo '<div class="notice notice-success"><p>Connection settings saved.</p></div>';
+		echo '<div class="notice notice-success"><p>Website settings saved.</p></div>';
 	}
 	if ( ! $status['enabled_on_current_site'] ) {
 		echo '<div class="notice notice-warning"><p>The helpers are paused or this website address has changed. Review the settings below and save to enable them on this website.</p></div>';
@@ -282,6 +283,7 @@ function admin_page(): void {
 			: 'Finish WP Rocket and MCP Adapter setup. This checks the installed library, not completed sign-in.',
 		'GeneratePress tool bridge'    => $bridge_ready ? 'Enabled and compatible. Verify the required tools through the primary GeneratePress connection.' : ( $status['generatepress_oauth_bridge']['enabled'] ? 'Enabled but unavailable. Review the compatibility warning and connection options.' : 'Switched off. Separate connections are used unless you enable the compatible bridge below.' ),
 		'PDF uploads'                  => $pdf_status,
+		'Imagify PDF protection'       => $status['imagify_pdf_protection']['message'],
 		'Redirection (optional)'       => ( $status['redirection']['enabled'] ? 'Enabled. ' : 'Switched off. ' )
 			. ( $status['redirection']['plugin_version'] ? 'Installed: ' . $status['redirection']['plugin_version'] . '. ' : 'Not active. ' ) . $status['redirection']['message'],
 		'Used CSS clearing'            => $status['used_css']['ready'] ? ( $status['used_css']['current_user_can_clear'] ? 'Ready for this administrator' : 'Save the settings below to grant your clearing permission.' ) : $status['used_css']['message'],
@@ -299,7 +301,7 @@ function admin_page(): void {
 	echo '</tbody></table><p><a href="' . esc_url( admin_url( 'options-general.php?page=generatepress-ai' ) ) . '">Open GeneratePress AI setup</a> · <a href="' . esc_url( admin_url( 'options-general.php?page=wprocket' ) ) . '">Open WP Rocket</a> · <a href="' . esc_url( admin_url( 'plugin-install.php?s=mcp-adapter&tab=search&type=term' ) ) . '">Find MCP Adapter</a> · <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Manage installed plugins</a></p>';
 
 	AdapterSetup\render();
-	echo '<h2>2. Choose the connection helpers</h2><form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
+	echo '<h2>2. Choose website settings</h2><form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 	wp_nonce_field( 'church_connector_save' );
 	echo '<input type="hidden" name="action" value="church_connector_save"><fieldset><legend class="screen-reader-text">Connection helpers for this website</legend>';
 	$options = array(
@@ -321,7 +323,8 @@ function admin_page(): void {
 	echo '<p id="cwc-codex-access">Optional alternative connection only: this permits Codex sign-in directly through WP Rocket. It adds no tools to the single GeneratePress connection. This helper applies to WP Rocket’s native client trust checks. The primary GeneratePress connection uses GeneratePress’s own sign-in. The official Codex identity represents the shared application. It does not grant access to everyone using Codex or restrict access to a particular person, device, project or chat. Each connection needs an authorised WordPress account and native sign-in/consent. Other chats with access to your authorised connection can use its permissions.</p>';
 	echo '<p id="cwc-gp-bridge-access">The single GeneratePress method is preselected for new setups and enabled after you save. Existing websites retain their saved choice during updates. GeneratePress AI keys do not expire: protect them in your client’s secure credential store and revoke unused connections in Settings → GeneratePress AI. Enabling this adds the fixed connector and WP Rocket tool list to every authorised GeneratePress AI client on this website, including existing connections. Review those connections first. Native WordPress permissions and operation checks still apply. Disabling this checkbox removes the extra tools; it does not revoke native keys. Supported: GeneratePress AI 1.0.x.</p>';
 	echo '</fieldset><p>Saving applies these choices to the website address shown above. If the address changed, previous helper-specific clearing grants are removed and only the current eligible administrator is granted access again. The official Codex client still uses native sign-in, permission checks and your consent. To revoke existing connections, use the providers’ own connection controls; switching off a helper does not revoke previously issued access.</p>';
-	submit_button( 'Save connection settings' );
+	Configuration\render();
+	submit_button( 'Save website settings' );
 	echo '</form><h2>' . ( $bridge_ready ? '3. Use the primary GeneratePress connection' : '3. Set up the website connections' ) . '</h2>';
 	echo $bridge_ready
 		? '<p>Use the GeneratePress address below as the single primary connection for GeneratePress, enabled connector features (including PDF uploads when enabled) and WP Rocket tools. Reuse an existing connection for this website where possible. Its native key stays valid until revoked; keep it in your client’s secure credential store. The WP Rocket address is an alternative for clients using a separate WP Rocket connection.</p>'
