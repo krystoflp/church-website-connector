@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.7.1
+Stable tag: 1.7.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -127,6 +127,7 @@ and refreshes only this plugin’s WordPress update information. It does not ins
 an update. Use Update now on Installed Plugins when you want to install it.
 A failed check reports an error and preserves the previous WordPress update offer.
 The button requires settings and plugin-update permissions and a valid form nonce.
+From 1.7.2, the result appears at the top of the settings page after the refresh.
 
 
 Install version 1.5.0 or newer once, then open Plugins > Installed Plugins and
@@ -471,6 +472,9 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.7.2 =
+* Show update-check success, warning and error messages immediately below the Website Connector page heading so the result is visible after the page refreshes.
 
 = 1.7.1 =
 * Add an administrator-only Check for updates now button in Settings → Website Connector. It bypasses the GitHub cache and refreshes the connector’s WordPress update information without installing an update.

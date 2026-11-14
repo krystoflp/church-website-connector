@@ -101,3 +101,7 @@ Other plugin update entries, their check schedule, connector settings and automa
 update preferences are preserved. Failed checks keep the previous WordPress update
 information. The button requires both settings and plugin-update permissions and
 appears once the website has installed 1.7.1 or newer.
+
+From **1.7.2**, update-check success, warning and error messages appear directly
+below the Website Connector page heading, where they are visible after the page
+refreshes. The check button remains in the Automatic updates section.
