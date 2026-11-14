@@ -38,7 +38,7 @@ namespace {
         check(is_wp_error(\ChurchWebsiteConnector\Integrations\get_item($target)),'Unsupported version must reject reads even when enabled');
         unset($GLOBALS['features'][$flag]);
     }
-    \ChurchWebsiteConnector\Integrations\register_abilities();check(!$GLOBALS['abilities'],'All integration abilities off by default');
+    \ChurchWebsiteConnector\Integrations\register_abilities();check(!$GLOBALS['abilities'],'Unconfigured integration abilities are unavailable');
     $GLOBALS['features']['snippets_tools']=true;\ChurchWebsiteConnector\Integrations\register_abilities();check(count($GLOBALS['abilities'])===6,'Bounded integration abilities registered');
     foreach($GLOBALS['abilities'] as $ability){check($ability['meta']['show_in_rest']===false&&$ability['input_schema']['additionalProperties']===false,'Raw ability REST execution hidden and unknown inputs rejected');}
     \ChurchWebsiteConnector\Integrations\register_routes();check(count($GLOBALS['routes'])===6,'Only six fixed REST endpoints');
