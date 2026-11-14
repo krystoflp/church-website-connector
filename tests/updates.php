@@ -17,6 +17,8 @@ function wp_verify_nonce( $nonce, $action ) { return $nonce === 'test-nonce' && 
 function delete_transient( $key ) { unset( $GLOBALS['cache'][$key] ); }
 function get_site_transient( $key ) { return isset( $GLOBALS['site_cache'][$key] ) ? clone $GLOBALS['site_cache'][$key] : false; }
 function set_site_transient( $key, $value ) { $GLOBALS['site_cache'][$key] = clone $value; }
+function get_option($key,$default=false){return $GLOBALS['options'][$key]??$default;}
+function update_option($key,$value,$autoload=false){$GLOBALS['options'][$key]=$value;return true;}
 function is_wp_error( $value ) { return $value instanceof WP_Error; }
 function plugin_basename( $path ) { return basename( dirname( $path ) ) . '/' . basename( $path ); }
 function add_filter( $name, $callback, $priority = 10, $args = 1 ) { $GLOBALS['filters'][$name] = [ $callback, $args ]; }
@@ -170,5 +172,10 @@ $_POST['_wpnonce'] = 'test-nonce'; $_SERVER['REQUEST_METHOD'] = 'GET'; fixture()
 check( U\check_now()->code === 'church_connector_update_request' && $GLOBALS['requests'] === [], 'GET cannot trigger update check' );
 $_SERVER['REQUEST_METHOD'] = 'POST'; fixture(); $GLOBALS['site_cache'] = [];
 check( U\check_now()['status'] === 'available' && get_site_transient('update_plugins')->last_checked === 0, 'Missing native cache is created without postponing other plugin checks' );
+fixture(); U\release(); $record = get_option(U\CHECK_STATUS);
+check($record['result']==='success' && $record['latest']==='1.5.1' && $record['last_success']>0,'Successful release lookup retains safe summary fields');
+fixture();$GLOBALS['responses'][U\API.'latest']=new WP_Error('network','private fixture error');U\release();$failed=get_option(U\CHECK_STATUS);
+check($failed['result']==='failed' && $failed['last_success']===$record['last_success'] && $failed['latest']==='1.5.1','Failure preserves last successful version and check time');
+check(!str_contains(json_encode($failed),'private fixture error') && count($failed)===4,'Release check history excludes remote errors and unapproved fields');
 echo 'GitHub updater regression checks passed (' . $checks . ' checks)' . PHP_EOL;
 }
