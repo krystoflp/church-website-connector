@@ -7,7 +7,16 @@ define( 'ABSPATH', __DIR__ . '/' );
 define( 'MINUTE_IN_SECONDS', 60 );
 define( 'HOUR_IN_SECONDS', 3600 );
 $GLOBALS['wp_version'] = '7.0.8';
-class WP_Error { public function __construct( public $code, public $message ) {} }
+class WP_Error { public function __construct( public $code, public $message ) {} public function get_error_code() { return $this->code; } public function get_error_message() { return $this->message; } }
+function add_action( $name, $callback, $priority = 10, $args = 1 ) { $GLOBALS['actions'][$name] = [ $callback, $args ]; }
+function current_user_can( $cap ) { return $GLOBALS['caps'][$cap] ?? false; }
+function __( $message, $domain = '' ) { return $message; }
+function sanitize_text_field( $value ) { return strip_tags( $value ); }
+function wp_unslash( $value ) { return stripslashes( $value ); }
+function wp_verify_nonce( $nonce, $action ) { return $nonce === 'test-nonce' && $action === 'church_connector_check_updates'; }
+function delete_transient( $key ) { unset( $GLOBALS['cache'][$key] ); }
+function get_site_transient( $key ) { return isset( $GLOBALS['site_cache'][$key] ) ? clone $GLOBALS['site_cache'][$key] : false; }
+function set_site_transient( $key, $value ) { $GLOBALS['site_cache'][$key] = clone $value; }
 function is_wp_error( $value ) { return $value instanceof WP_Error; }
 function plugin_basename( $path ) { return basename( dirname( $path ) ) . '/' . basename( $path ); }
 function add_filter( $name, $callback, $priority = 10, $args = 1 ) { $GLOBALS['filters'][$name] = [ $callback, $args ]; }
@@ -121,5 +130,45 @@ check( U\release( '1.5.1' ) === [], 'Exact-tag download cannot substitute anothe
 $borrowed = tempnam( sys_get_temp_dir(), 'cwc-borrowed-' ); file_put_contents( $borrowed, 'tampered' ); fixture();
 check( is_wp_error( U\verified_download( $borrowed, U\asset_url( '1.5.1', 'zip' ), null, [] ) ), 'Packages returned by another filter are still verified' );
 check( is_file( $borrowed ), 'A file supplied by another filter is not deleted' ); unlink( $borrowed );
+check( isset( $GLOBALS['actions']['admin_post_church_connector_check_updates'] ) && ! isset( $GLOBALS['actions']['admin_post_nopriv_church_connector_check_updates'] ), 'Update check uses authenticated admin-post only' );
+$GLOBALS['caps'] = [ 'manage_options' => true, 'update_plugins' => true ];
+$_SERVER['REQUEST_METHOD'] = 'POST'; $_POST['_wpnonce'] = 'test-nonce';
+$other = (object) [ 'new_version' => '9.0' ];
+$original_updates = (object) [ 'last_checked' => time(), 'response' => [ 'other/other.php' => $other ], 'no_update' => [ 'current/current.php' => $other ], 'checked' => [ 'other/other.php' => '8.0' ], 'translations' => [ 'keep' ] ];
+$GLOBALS['site_cache'] = [ 'update_plugins' => clone $original_updates ];
+fixture();
+$GLOBALS['cache'][ U\CACHE . 'latest' ] = [ 'version' => '1.5.0' ];
+$result = U\check_now();
+check( $result === [ 'status' => 'available', 'version' => '1.5.1' ] && count( $GLOBALS['requests'] ) === 2, 'Manual check bypasses a successful twelve-hour cache' );
+$updates = get_site_transient( 'update_plugins' ); $file = U\plugin_file();
+check( $updates->response[$file]->new_version === '1.5.1' && $updates->response[$file]->plugin === $file, 'Manual check populates native plugin update entry' );
+check( $updates->last_checked === $original_updates->last_checked && $updates->response['other/other.php'] === $other && $updates->no_update['current/current.php'] === $other && $updates->translations === ['keep'], 'Manual check preserves unrelated updates, translations and scheduling' );
+check( $GLOBALS['downloads'] === [] && ! isset( $updates->response[$file]->autoupdate ), 'Check never downloads or forces automatic installation' );
+fixture(); $GLOBALS['cache'][ U\CACHE . 'latest' ] = [];
+check( U\check_now()['status'] === 'available' && count( $GLOBALS['requests'] ) === 2, 'Manual check bypasses failed fifteen-minute cache too' );
+foreach ( [ '1.5.0' => 'current', '1.4.9' => 'ahead' ] as $version => $status ) {
+    fixture( $version );
+    check( U\check_now()['status'] === $status, 'Manual check reports ' . $status );
+    $updates = get_site_transient( 'update_plugins' );
+    check( ! isset( $updates->response[$file] ) && $updates->no_update[$file]->new_version === $version, 'Equal or older release clears stale connector offer without downgrade' );
+}
+[ $r, $m ] = fixture(); $m['requires_php'] = '99.0'; $GLOBALS['responses'][U\asset_url('1.5.1','json')] = response($m);
+check( U\check_now()['status'] === 'incompatible' && get_site_transient('update_plugins')->response[$file]->disable_autoupdate === true, 'Manual check reports and blocks incompatible automatic update' );
+$before = serialize( get_site_transient('update_plugins') );
+fixture(); $GLOBALS['responses'][U\API.'latest'] = new WP_Error('network','Offline');
+check( is_wp_error( U\check_now() ) && serialize( get_site_transient('update_plugins') ) === $before, 'Failed check preserves all previous WordPress update information' );
+foreach ( [ 'manage_options', 'update_plugins' ] as $cap ) {
+    fixture(); $GLOBALS['caps'][$cap] = false;
+    check( U\check_now()->code === 'church_connector_update_denied' && $GLOBALS['requests'] === [], 'Missing ' . $cap . ' denied before network or cache mutation' );
+    $GLOBALS['caps'][$cap] = true;
+}
+foreach ( [ '', 'wrong', ['test-nonce'] ] as $nonce ) {
+    fixture(); $_POST['_wpnonce'] = $nonce;
+    check( U\check_now()->code === 'church_connector_update_nonce' && $GLOBALS['requests'] === [], 'Missing, invalid or array nonce denied without side effects' );
+}
+$_POST['_wpnonce'] = 'test-nonce'; $_SERVER['REQUEST_METHOD'] = 'GET'; fixture();
+check( U\check_now()->code === 'church_connector_update_request' && $GLOBALS['requests'] === [], 'GET cannot trigger update check' );
+$_SERVER['REQUEST_METHOD'] = 'POST'; fixture(); $GLOBALS['site_cache'] = [];
+check( U\check_now()['status'] === 'available' && get_site_transient('update_plugins')->last_checked === 0, 'Missing native cache is created without postponing other plugin checks' );
 echo 'GitHub updater regression checks passed (' . $checks . ' checks)' . PHP_EOL;
 }
