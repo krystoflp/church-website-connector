@@ -272,8 +272,8 @@ function handle_check(): void {
 	exit;
 }
 
-/** Render a one-use, account-specific result and the immediate check control. */
-function render_check(): void {
+/** Render the one-use, account-specific result at the top of the settings page. */
+function render_notice(): void {
 	if ( ! current_user_can( 'manage_options' ) || ! current_user_can( 'update_plugins' ) ) {
 		return;
 	}
@@ -310,6 +310,13 @@ function render_check(): void {
 		if ( '' !== $message ) {
 			echo '<div class="notice notice-' . esc_attr( $type ) . ' inline" role="status"><p>' . esc_html( $message ) . '</p></div>';
 		}
+	}
+}
+
+/** Render the immediate check control in the Automatic updates section. */
+function render_check(): void {
+	if ( ! current_user_can( 'manage_options' ) || ! current_user_can( 'update_plugins' ) ) {
+		return;
 	}
 	echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 	echo '<input type="hidden" name="action" value="church_connector_check_updates">';

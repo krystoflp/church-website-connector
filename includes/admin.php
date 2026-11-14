@@ -243,6 +243,7 @@ function admin_page(): void {
 			? 'Enabled for this administrator. Up to ' . $pdf_limit . ' per PDF; client limits may be lower.'
 			: 'Enabled, but this account does not have permission to upload files.' );
 	echo '<div class="wrap"><h1>Website Connector</h1>';
+	Updates\render_notice();
 	echo '<p>Connect your assistant to this website using the setup selected below. Reuse an existing connection for this website where available; a new connection needs native website sign-in and your consent.</p>';
 	echo '<p><strong>Plugin version:</strong> ' . esc_html( VERSION ) . '</p>';
 	echo '<p><strong>Website:</strong> ' . esc_html( $status['current_site_url'] ) . '</p>';
