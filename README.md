@@ -14,7 +14,8 @@ Rocket product. Vendor plugins and commercial licences are separate.
 2. In WordPress, open **Plugins → Add Plugin → Upload Plugin**. Upload the ZIP,
    activate it, or replace the existing connector when upgrading.
 3. Open **Settings → Website Connector** and follow its connection guidance.
-4. On **Plugins → Installed Plugins**, choose **Enable auto-updates** for Church
+4. New 1.7.3 installations select automatic updates once. For an existing installation,
+   on **Plugins → Installed Plugins**, choose **Enable auto-updates** for Church
    Website Connector. WordPress's normal schedule and hosting policy apply.
 
 Requires PHP 8.3+, single-site WordPress 7.0+, compatible GeneratePress AI/MCP and
@@ -105,3 +106,33 @@ appears once the website has installed 1.7.1 or newer.
 From **1.7.2**, update-check success, warning and error messages appear directly
 below the Website Connector page heading, where they are visible after the page
 refreshes. The check button remains in the Automatic updates section.
+
+## Administrator setup and maintenance in 1.7.3
+
+New connector installations select WordPress’s native auto-update preference once
+on first administrator activation. The same default applies to the standalone
+MCP Adapter only when newly installed by this connector. Existing installations,
+upgrades, reactivation, moved/copied configuration and later administrator choices
+are preserved. The normal Installed Plugins switch remains available; hosting
+policy, plugin-update permission, scheduling and compatibility requirements apply.
+
+Adapter setup now shows informational pending/progress messages in its dedicated
+notice, readiness row and setup panel. Failure, interruption or a blocked setup
+shows the action needed. Other dependency warnings and native readiness checks
+remain accurate; installers still run only in authorised administrator setup.
+
+Settings → Website Connector starts with a compact version, update-history,
+auto-update and connection summary. It includes a copyable diagnostic report that
+is also available in native Site Health Info. The report is allowlisted and omits
+addresses, credentials, licence data, raw errors, account/activity records, content,
+code and form submissions. Views require administrator permissions and make no
+external diagnostic request. Clipboard failure leaves keyboard copying available.
+
+Tools → Connector changes reads the existing four bounded audit stores and shows
+at most 50 combined events, newest first. It displays time, account, helper,
+operation, item ID and outcome without copying stored URLs, values or code. It is
+not a complete WordPress activity log and does not expand backend retention.
+
+Validation includes native WordPress first-install and preservation cases,
+diagnostic privacy sentinels and permission checks, read-only views, every update
+notice outcome, and browser-client progress/clipboard success and failure checks.
