@@ -25,9 +25,19 @@ jobs:
       - name: Check PHP syntax and access boundaries
         run: |
           php -v
+          php -r 'exit(PHP_VERSION_ID >= 80300 && PHP_VERSION_ID < 80400 ? 0 : 1);' 
           find . -path ./.git -prune -o -name '*.php' -type f -print0 | xargs -0 -n 1 php -l
           php tests/updates.php
           php tests/integrations.php
+          php tests/adapter-setup.php
+          node --check assets/setup.js
+          node tests/setup-client.js
+      - name: Check changed PHP files against WordPress Core standards
+        run: |
+          coding_dir="$RUNNER_TEMP/connector-coding"
+          mkdir -p "$coding_dir"
+          composer require --working-dir="$coding_dir" --dev --no-interaction --no-plugins --no-scripts --prefer-dist wp-coding-standards/wpcs:3.4.1 squizlabs/php_codesniffer:3.13.6 phpcsstandards/phpcsutils:1.2.3 phpcsstandards/phpcsextra:1.5.1
+          "$coding_dir/vendor/bin/phpcs" --runtime-set installed_paths "$coding_dir/vendor/wp-coding-standards/wpcs,$coding_dir/vendor/phpcsstandards/phpcsutils,$coding_dir/vendor/phpcsstandards/phpcsextra" --standard=WordPress-Core church-website-connector.php includes/admin.php includes/adapter-setup.php uninstall.php
       - name: Build distributable package
         run: python3 scripts/build.py
 

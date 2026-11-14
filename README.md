@@ -31,9 +31,25 @@ are preserved. A GitHub outage leaves the installed connector running.
 Use the attached installation ZIP. GitHub's automatic source archives also
 contain development files and are not the prepared installation package.
 
-## Optional integrations in 1.6.0
+## Setup defaults in 1.7.0
 
-Enable the integrations separately in **Settings → Website Connector**, then
+New setups preselect the single GeneratePress connection. Review existing
+GeneratePress clients and save to enable it. All four plugin helpers start
+selected and wait when their plugin is absent or unsupported. Discovery
+compatibility stays on; direct WP Rocket Codex sign-in starts off. Existing
+websites retain their saved choices during updates and reactivation.
+
+Normal plugin activation/deactivation replaces the master checkbox. Copied or
+moved websites still require administrator review and saving at the new address.
+During new administrator setup, the connector installs or activates the separate
+[official MCP Adapter](https://wordpress.org/plugins/mcp-adapter/) if needed.
+Compatible existing adapters are reused. Failures provide retry/manual options;
+completed setup does not automatically undo later adapter deactivation. Nothing
+is installed from ordinary site visits or automatic connector upgrades.
+
+## Optional integrations
+
+Choose the integrations in **Settings → Website Connector**, then
 refresh your connection. The SEO Framework and Rank Math cover individual SEO
 fields and selected site-wide settings, including sitemaps. Code Snippets Free
 supports reviewed management; new snippets stay inactive, and activation or
@@ -44,8 +60,8 @@ Submission records, notification credentials and licence settings are excluded.
 All changes use a current-state read, a concrete preview and a short-lived,
 account-bound approval token. Native plugin permissions and version guards apply.
 See [the plugin guide](readme.txt) for supported versions, exact scope, six tool
-names and authenticated REST paths. These integrations start switched off after
-upgrading; automatic updates preserve existing feature choices.
+names and authenticated REST paths. New setups select all four integrations; automatic updates preserve existing
+feature choices, including disabled integrations.
 
 ## Development and releases
 
@@ -54,8 +70,9 @@ The wider development toolkit, site profiles and private verification records
 are maintained separately. Do not add website configuration, credentials,
 licence keys, vendor fixtures or client data here.
 
-Run `php tests/updates.php` and `php tests/integrations.php` for the isolated updater boundary checks, lint the PHP
-files, and run `python3 scripts/build.py` to produce a deterministic ZIP, release
+Run `php tests/updates.php`, `php tests/integrations.php`,
+`php tests/adapter-setup.php` and `node tests/setup-client.js`, lint the PHP
+files on PHP 8.3, and run `python3 scripts/build.py` to produce a deterministic ZIP, release
 metadata and checksum in `dist/`. The complete connector regression and isolated
 WordPress upgrade checks are run in the maintained development toolkit before a
 release is published.

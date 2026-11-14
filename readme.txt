@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.6.0
+Stable tag: 1.7.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -18,10 +18,10 @@ Church Website Connector tools and the allowlisted WP Rocket tools. Complete the
 native GeneratePress sign-in and consent. A separate WP Rocket OAuth sign-in is
 not needed for those tools through this connection.
 
-The bridge supports GeneratePress AI >=1.0.0 <1.1.0. It defaults off on a new
-installation and on upgrade from a version without the option; updating preserves
-an existing choice. Enable it explicitly in Settings > Website Connector after
-reviewing the website's authorised GeneratePress clients. Only the fixed list of
+The bridge supports GeneratePress AI >=1.0.0 <1.1.0. It is preselected during a new setup,
+and becomes enabled after an administrator reviews the existing authorised
+GeneratePress clients and saves the settings. Updates and reactivation preserve
+existing choices; older installations without this choice remain off. Only the fixed list of
 registered, MCP-public abilities is added. Native account permissions, feature
 switches and each tool's operation checks still apply.
 
@@ -41,10 +41,10 @@ that sign-in, client discovery or an upload has completed successfully.
    activate it as an administrator, or replace the installed version when updating.
 2. Open Settings > Website Connector. Resolve any missing or inactive dependencies
    shown there, including GeneratePress AI setup and licence activation.
-3. Choose the connection helpers for this website. For the single primary
-   GeneratePress connection, review existing authorised clients, select
-   "Use one GeneratePress connection for the enabled connector and WP Rocket tools"
-   and save the settings.
+3. Open the connector settings to complete setup. New setups automatically
+   install or activate the separate official MCP Adapter when needed. Review the
+   selected features and existing authorised GeneratePress clients, then save.
+   The recommended single GeneratePress connection is preselected for new setups.
 4. Copy the setup message from that page into your website project chat. Reuse an
    existing connection for this exact website where available. A new connection
    needs native website sign-in and consent. Keep passwords, tokens and licence
@@ -59,9 +59,11 @@ clear caches. Those actions require their own authorised task. Where compatible
 Used CSS services are available, saving settings can grant only the current
 eligible administrator the connector's separate Used CSS clearing permission.
 
-Activation enables the standard connection helpers on the saved website addresses.
-Redirection, the four plugin integrations and the GeneratePress bridge require separate opt-ins. Settings
-can disable individual features. Reactivation on the same installation preserves
+Activation enables the selected connector features on the saved website addresses.
+New setups keep discovery compatibility on, leave alternative WP Rocket Codex
+sign-in off, and select all four plugin integrations. Redirection remains opt-in.
+The GeneratePress connection method is preselected and awaits the first settings
+save. Settings can disable individual features. Reactivation on the same installation preserves
 saved choices. The plugin binds to WordPress's saved HTTPS Site Address and
 WordPress Address, not the request Host header or a client-supplied URL. A copied
 database or changed address pauses the helpers until an administrator re-enables
@@ -71,6 +73,51 @@ This is an independent GPL plugin, not an official GeneratePress or WP Rocket
 product. Its public source and releases are at:
 https://github.com/krystoflp/church-website-connector
 Changes in vendor interfaces may need a connector update.
+
+== Setup defaults and MCP Adapter (1.7.0) ==
+
+The plugin's normal activation/deactivation controls replace the former master
+"Enable the helpers on this website" checkbox. Reactivation resumes the selected
+features and preserves individual choices. Existing paused configurations and
+moved/copied websites stay paused until an administrator reviews and saves the
+settings for that address. Deactivation does not revoke native provider keys.
+The internal enabled/address binding remains a safeguard, not a checkbox.
+
+For a new setup, the single GeneratePress method is preselected, but its extended
+tool scope is enabled only after the first settings save. Review authorised
+GeneratePress clients before saving: every authorised client gets the enabled
+connector and allowlisted WP Rocket tools. Individual permissions and approval
+requirements remain. Existing sites are not silently switched during upgrades.
+Discovery compatibility remains on; alternative direct WP Rocket Codex sign-in
+starts off. It can be enabled if a separately configured fallback is wanted.
+
+The separate preferred dependency is the official WordPress.org MCP Adapter:
+https://wordpress.org/plugins/mcp-adapter/ (slug mcp-adapter).
+No adapter code or other vendor plugin is bundled in the connector ZIP.
+
+On the Website Connector administrator setup screen, a new setup makes one
+automatic nonce-protected POST to install/activate that adapter if no compatible
+loaded adapter is available. It reuses a compatible adapter supplied elsewhere,
+or activates an already-installed compatible preferred adapter without downloading
+another copy. Active outdated adapters are reported for update, not replaced.
+The automatic setup window expires after seven days; explicit setup remains
+available. Ordinary page visits, REST/MCP requests and automatic connector updates
+do not trigger installation. A deliberately deactivated adapter is not repeatedly
+reactivated after setup completes. The administrator can explicitly retry later.
+
+Setup requires native plugin installation and activation permissions, allowed
+file modifications and the exact bound website. It uses WordPress's repository
+API, upgrader and activation checks, accepts only the exact versioned official
+MCP Adapter download address, and never accepts an arbitrary plugin or ZIP URL.
+Automatic installation requires WordPress's direct filesystem method. Where
+filesystem credentials are needed, use the native manual WordPress installation
+link. No filesystem credentials are collected or stored by this connector.
+Failures show a bounded explanation with retry/manual installation options;
+uncertain/interrupted results require inspecting Plugins before retrying.
+
+The adapter remains independent and has its own WordPress update controls. The
+connector does not enable its auto-updates, delete it on uninstall, or install
+The SEO Framework, Rank Math, Code Snippets, WS Form Pro or commercial licences.
 
 == Automatic updates ==
 
@@ -121,8 +168,9 @@ connected account's permissions must all be checked on the intended website.
 
 == Optional SEO, snippet and form integrations (1.6.0) ==
 
-Enable each integration separately in Settings > Website Connector. New switches
-start off, including on upgrade; existing choices are preserved. Refresh the
+New setups select all four integrations in Settings > Website Connector. Existing
+websites keep their saved choices, including off choices; missing integration
+flags in older configurations remain off. Each switch remains independent. Refresh the
 connected client's tools after saving. Both the existing MCP connection and six
 fixed authenticated REST endpoints expose the same protected operations. All
 require an administrator on this connector's bound website plus native plugin
@@ -151,7 +199,13 @@ Supported and locally tested native plugins:
   editing such a published form also requires native publish_form permission.
 
 Version ranges are guards, not claims that every version in a range was tested.
-Unsupported/missing native interfaces pause the integration. Only the documented
+Unsupported/missing native interfaces pause the integration. A selected helper
+for an absent plugin displays "Not active—helper waiting"; absence is not a setup
+error. Both SEO helper switches can stay selected when only one SEO plugin is
+active. Selecting a helper does not install or activate its vendor plugin.
+Activating a compatible vendor plugin later makes its selected helper available
+to existing authorised connections, still subject to native permissions and
+preview/approval requirements. Only the documented
 editable subset is available; use integration-capabilities for exact schemas.
 WS Form field metadata follows its native AI schema (for example required='on'
 or ''), and preserves existing IDs/types in full-design updates. Use structural
@@ -409,6 +463,14 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.7.0 =
+* Preselect the single GeneratePress method for new setups, confirmed on the first settings save; preserve existing connection choices.
+* Enable all four plugin helpers by default for new setups, with dormant waiting status for unavailable plugins and unchanged approval checks.
+* Remove the master checkbox; retain normal activation/deactivation, saved feature choices and copied-site/address safeguards.
+* Install or activate the separate official MCP Adapter during new administrator setup using WordPress core APIs; include explicit retry and manual fallback.
+* Keep discovery compatibility enabled and alternative direct WP Rocket Codex sign-in off in new setups.
+* Add PHP 8.3, native installer, setup-client and WordPress coding-standard checks.
 
 = 1.6.0 =
 * Add optional authenticated REST and MCP access to The SEO Framework and Rank Math page/post and site-wide SEO settings.
