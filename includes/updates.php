@@ -6,10 +6,11 @@ namespace ChurchWebsiteConnector\Updates;
 
 defined( 'ABSPATH' ) || exit;
 
-const REPOSITORY = 'https://github.com/krystoflp/church-website-connector';
-const API        = 'https://api.github.com/repos/krystoflp/church-website-connector/releases/';
-const SLUG       = 'church-website-connector';
-const CACHE      = 'church_connector_release_';
+const REPOSITORY   = 'https://github.com/krystoflp/church-website-connector';
+const API          = 'https://api.github.com/repos/krystoflp/church-website-connector/releases/';
+const SLUG         = 'church-website-connector';
+const CACHE        = 'church_connector_release_';
+const CHECK_STATUS = 'church_connector_update_status';
 
 function plugin_file(): string {
 	return plugin_basename( dirname( __DIR__ ) . '/church-website-connector.php' );
@@ -50,6 +51,9 @@ function release( string $version = '' ): array {
 	$cached = get_transient( $key );
 	if ( is_array( $cached ) ) {
 		return $cached;
+	}
+	if ( '' === $version ) {
+		record_check( false );
 	}
 	// Cache failures briefly too; a GitHub outage must not repeatedly delay requests.
 	set_transient( $key, array(), 15 * MINUTE_IN_SECONDS );
@@ -109,9 +113,28 @@ function release( string $version = '' ): array {
 		'published_at' => $data['published_at'],
 		'notes'        => is_string( $data['body'] ?? null ) ? substr( $data['body'], 0, 60000 ) : '',
 	);
+	if ( '' === $version ) {
+		record_check( true, $found_version );
+	}
 	set_transient( CACHE . $found_version, $result, 12 * HOUR_IN_SECONDS );
 	set_transient( $key, $result, 12 * HOUR_IN_SECONDS );
 	return $result;
+}
+
+/** Retain only timestamps, outcome and a validated version, never remote content. */
+function record_check( bool $success, string $version = '' ): void {
+	$old = get_option( CHECK_STATUS, array() );
+	$old = is_array( $old ) ? $old : array();
+	update_option(
+		CHECK_STATUS,
+		array(
+			'last_attempt' => time(),
+			'last_success' => $success ? time() : (int) ( $old['last_success'] ?? 0 ),
+			'latest'       => $success ? $version : ( stable_version( $old['latest'] ?? null ) ? $old['latest'] : '' ),
+			'result'       => $success ? 'success' : 'failed',
+		),
+		false
+	);
 }
 
 function compatible( array $release ): bool {

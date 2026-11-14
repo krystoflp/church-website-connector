@@ -30,8 +30,10 @@ function dependency_issues(): array {
 	}
 	$adapter = AdapterSetup\status();
 	if ( ! $adapter['compatible'] ) {
+		$presentation          = AdapterSetup\presentation();
 		$issues['mcp_adapter'] = array(
-			'message' => $adapter['message'],
+			'message' => $presentation['message'],
+			'level'   => $presentation['level'],
 			'url'     => admin_url( 'options-general.php?page=church-website-connector' ),
 			'action'  => 'Set up MCP Adapter',
 		);
@@ -82,9 +84,13 @@ function dependency_notice(): void {
 		return;
 	}
 	$issues = dependency_issues();
-	if ( ! $issues ) {
-		return;
+	if ( isset( $issues['mcp_adapter'] ) ) {
+		$adapter = $issues['mcp_adapter'];
+		echo '<div data-cwc-adapter-notice class="notice notice-' . esc_attr( $adapter['level'] ) . '"><p data-cwc-adapter-message>' . esc_html( $adapter['message'] ) . '</p><p><a href="' . esc_url( $adapter['url'] ) . '">' . esc_html( $adapter['action'] ) . '</a></p></div>';
+		unset( $issues['mcp_adapter'] );
 	}
+	if ( ! $issues ) {
+		return; }
 	echo '<div class="notice notice-warning"><p><strong>Website Connector needs setup</strong></p><ul>';
 	foreach ( $issues as $issue ) {
 		echo '<li>' . esc_html( $issue['message'] ) . ' <a href="' . esc_url( $issue['url'] ) . '">' . esc_html( $issue['action'] ) . '</a></li>';
@@ -244,6 +250,7 @@ function admin_page(): void {
 			: 'Enabled, but this account does not have permission to upload files.' );
 	echo '<div class="wrap"><h1>Website Connector</h1>';
 	Updates\render_notice();
+	Maintenance\render_summary( $status );
 	echo '<p>Connect your assistant to this website using the setup selected below. Reuse an existing connection for this website where available; a new connection needs native website sign-in and your consent.</p>';
 	echo '<p><strong>Plugin version:</strong> ' . esc_html( VERSION ) . '</p>';
 	echo '<p><strong>Website:</strong> ' . esc_html( $status['current_site_url'] ) . '</p>';
@@ -265,7 +272,7 @@ function admin_page(): void {
 	echo '<h2>1. Check the website plugins</h2><table class="widefat striped"><caption class="screen-reader-text">Required website plugins and local readiness</caption><thead><tr><th scope="col">Requirement</th><th scope="col">Status</th></tr></thead><tbody>';
 	$rows = array(
 		'WordPress Abilities API'      => $deps['wordpress_abilities'] ? 'Available' : 'Update WordPress to a supported release.',
-		'MCP Adapter'                  => AdapterSetup\status()['message'],
+		'MCP Adapter'                  => AdapterSetup\presentation()['message'],
 		'GeneratePress AI'             => $deps['generatepress_ai_version'] ? 'Active: ' . $deps['generatepress_ai_version'] : 'Install and activate GeneratePress AI.',
 		'GeneratePress One licence'    => true === $deps['generatepress_license_cached_active'] ? 'Active in the cached local check' : 'Check or activate in Settings → GeneratePress AI.',
 		'GenerateBlocks'               => $deps['generateblocks_version'] && version_compare( $deps['generateblocks_version'], '2.3', '>=' ) ? 'Active: ' . $deps['generateblocks_version'] : 'Install or update GenerateBlocks to 2.3 or newer.',
@@ -287,7 +294,7 @@ function admin_page(): void {
 		);
 	}
 	foreach ( $rows as $label => $message ) {
-		echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( $message ) . '</td></tr>';
+		echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td' . ( 'MCP Adapter' === $label ? ' data-cwc-adapter-message' : '' ) . '>' . esc_html( $message ) . '</td></tr>';
 	}
 	echo '</tbody></table><p><a href="' . esc_url( admin_url( 'options-general.php?page=generatepress-ai' ) ) . '">Open GeneratePress AI setup</a> · <a href="' . esc_url( admin_url( 'options-general.php?page=wprocket' ) ) . '">Open WP Rocket</a> · <a href="' . esc_url( admin_url( 'plugin-install.php?s=mcp-adapter&tab=search&type=term' ) ) . '">Find MCP Adapter</a> · <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Manage installed plugins</a></p>';
 
@@ -329,7 +336,7 @@ function admin_page(): void {
 	}
 	echo '<p><label for="cwc-setup-prompt"><strong>Copy this message into your website project chat</strong></label></p><textarea class="large-text" id="cwc-setup-prompt" rows="12" readonly>' . esc_textarea( $prompt ) . '</textarea>';
 	echo '<p>The tested client is native Codex desktop. The Codex trust helper above applies to the separate WP Rocket route; the primary connection uses GeneratePress’s native sign-in. Other clients must support the selected provider’s OAuth flow. This page checks local readiness, not completed sign-in, tool discovery or a successful upload.</p>';
-	echo '<h2>Automatic updates</h2><p>Updates are available from the connector’s published GitHub releases. To receive them automatically, open <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Installed Plugins</a> and enable auto-updates for Church Website Connector. Your website’s update policy and schedule apply.</p>';
+	echo '<h2 id="cwc-update-check">Automatic updates</h2><p>Updates are available from the connector’s published GitHub releases. To receive them automatically, open <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Installed Plugins</a> and review the auto-update setting for Church Website Connector. New installations select it once when website policy permits. Your website’s update policy and schedule apply.</p>';
 	Updates\render_check();
 	echo '<h2>Optional plugin integrations</h2><p>The SEO Framework, Rank Math, Code Snippets and WS Form Pro each have a separate switch above. New setups select all four; missing or incompatible plugins leave their helper waiting. Both SEO switches can stay selected when the website uses only one SEO plugin. Updates preserve existing choices. After changing a switch or activating its plugin, refresh your connection and start with integration-capabilities. Read the item, review a preview, then apply only after approval. Code-executing changes require a separate acknowledgement. WS Form tools cover form design and selected settings; submission records and notification credentials are excluded.</p>';
 	echo '<h2>Page, post and media details</h2><p>Use the selected website connection to inspect supported details, featured images, categories and existing media descriptions or alt text. Changes to existing details require a reviewed preview belonging to the signed-in account, and are rejected if the item changed. GeneratePress handles block content and draft authoring. WordPress permissions still apply; no separate REST connection or password is needed.</p>';
@@ -341,6 +348,7 @@ function admin_page(): void {
 	if ( $status['used_css']['current_user_can_clear'] ) {
 		echo '<p><a class="button" href="' . esc_url( admin_url( 'tools.php?page=church-connector-used-css' ) ) . '">Open Used CSS tool</a></p>';
 	}
+	Maintenance\render_diagnostics();
 	echo '<p>Used CSS support in this release: WP Rocket 3.24.x. Later versions pause clearing until a compatible plugin update is installed. No content or cache is changed by opening this page.</p></div>';
 }
 
