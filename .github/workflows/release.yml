@@ -22,11 +22,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check PHP syntax and updater boundaries
+      - name: Check PHP syntax and access boundaries
         run: |
           php -v
           find . -path ./.git -prune -o -name '*.php' -type f -print0 | xargs -0 -n 1 php -l
           php tests/updates.php
+          php tests/integrations.php
       - name: Build distributable package
         run: python3 scripts/build.py
 
