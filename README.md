@@ -136,3 +136,17 @@ not a complete WordPress activity log and does not expand backend retention.
 Validation includes native WordPress first-install and preservation cases,
 diagnostic privacy sentinels and permission checks, read-only views, every update
 notice outcome, and browser-client progress/clipboard success and failure checks.
+
+## Redirection default and automatic-update control in 1.7.4
+
+New installations enable **Enable Redirection management through MCP** by default.
+Existing settings, including disabled or missing legacy choices, stay unchanged
+on upgrade and reactivation. The separate supported Redirection plugin, native
+permissions, website binding, previews and explicit approval remain required.
+
+Installed Plugins keeps the normal WordPress enable/disable auto-update control
+available for the connector even before a successful GitHub check or when release
+information is temporarily unavailable. The updater declares support for its own
+plugin entry; it does not invent an update offer, force an update preference or
+bypass website policy. The one-time installation default from 1.7.3 is unchanged.
+Upgrading an earlier installation does not silently opt it into auto-updates.
