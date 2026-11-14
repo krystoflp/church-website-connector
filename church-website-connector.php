@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Church Website Connector
- * Description: Prepares GeneratePress AI and WP Rocket connections, allows the official Codex client, and adds protected Used CSS, PDF upload, REST-backed metadata and Redirection management tools through MCP.
- * Version: 1.7.4
+ * Description: Prepares GeneratePress AI and WP Rocket connections, allows the official Codex client, adds protected tools through MCP, and provides website configuration including Imagify PDF protection.
+ * Version: 1.8.0
  * Requires at least: 7.0
  * Requires PHP: 8.3
  * Author: Church Website Toolkit
@@ -17,7 +17,7 @@ namespace ChurchWebsiteConnector;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION  = '1.7.4';
+const VERSION  = '1.8.0';
 const SETTINGS = 'church_website_connector_settings';
 
 function settings(): array {
@@ -84,7 +84,7 @@ function legacy_used_css(): array {
 }
 
 function feature_enabled( string $feature ): bool {
-	return is_bound() && true === ( settings()[ $feature ] ?? ( 'rest_tools' === $feature ) );
+	return is_bound() && true === ( settings()[ $feature ] ?? in_array( $feature, array( 'rest_tools', 'imagify_pdf_protection' ), true ) );
 }
 
 /** Grant only the current administrator, and only when native Used CSS is ready. */
@@ -124,8 +124,10 @@ function configure( array $flags ) {
 	foreach ( array( 'enabled', 'compatibility', 'codex', 'used_css' ) as $key ) {
 		$saved[ $key ] = ( $flags[ $key ] ?? false ) === true;
 	}
-	$saved['rest_tools']        = ( $flags['rest_tools'] ?? true ) === true;
-	$saved['redirection_tools'] = ( $flags['redirection_tools'] ?? false ) === true;
+	// Missing flags in older callers preserve this configuration choice; new or legacy absence receives the enabled default.
+	$saved['imagify_pdf_protection'] = ( $flags['imagify_pdf_protection'] ?? $previous['imagify_pdf_protection'] ?? true ) === true;
+	$saved['rest_tools']             = ( $flags['rest_tools'] ?? true ) === true;
+	$saved['redirection_tools']      = ( $flags['redirection_tools'] ?? false ) === true;
 	foreach ( array( 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools' ) as $key ) {
 		$saved[ $key ] = ( $flags[ $key ] ?? false ) === true; }
 	// Existing choices remain explicit; new setups preselect the bridge in the form.
@@ -148,17 +150,18 @@ function activate( $network_wide = false ): void {
 	$identity         = current_identity();
 	$same_site        = ( $saved['schema'] ?? null ) === 1 && ( $saved['home'] ?? '' ) === $identity['home'] && ( $saved['wordpress'] ?? '' ) === $identity['wordpress'];
 	$flags            = $same_site ? $saved : array(
-		'compatibility'        => true,
-		'codex'                => false,
-		'used_css'             => true,
-		'rest_tools'           => true,
-		'redirection_tools'    => ( $saved['redirection_tools'] ?? ! $saved ) === true,
-		'tsf_tools'            => true,
-		'rankmath_tools'       => true,
-		'snippets_tools'       => true,
-		'wsform_tools'         => true,
-		'generatepress_bridge' => false,
-		'setup_pending'        => true,
+		'compatibility'          => true,
+		'codex'                  => false,
+		'used_css'               => true,
+		'rest_tools'             => true,
+		'imagify_pdf_protection' => ( $saved['imagify_pdf_protection'] ?? true ) === true,
+		'redirection_tools'      => ( $saved['redirection_tools'] ?? ! $saved ) === true,
+		'tsf_tools'              => true,
+		'rankmath_tools'         => true,
+		'snippets_tools'         => true,
+		'wsform_tools'           => true,
+		'generatepress_bridge'   => false,
+		'setup_pending'          => true,
 	);
 	$flags['enabled'] = true;
 	$result           = configure( $flags );
@@ -173,6 +176,8 @@ function activate( $network_wide = false ): void {
 	}
 }
 
+// Configuration hooks load on every request, independently of MCP readiness or sign-in.
+require_once __DIR__ . '/includes/configuration.php';
 require_once __DIR__ . '/includes/used-css.php';
 require_once __DIR__ . '/includes/compatibility.php';
 require_once __DIR__ . '/includes/rest-tools.php';

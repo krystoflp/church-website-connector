@@ -1,7 +1,8 @@
 # Church Website Connector
 
 A reusable WordPress plugin for GeneratePress AI and WP Rocket connections,
-protected Used CSS operations, PDF uploads, page/post/media metadata and optional
+website configuration including Imagify PDF protection, protected Used CSS operations,
+PDF uploads, page/post/media metadata and optional
 Redirection, The SEO Framework, Rank Math, Code Snippets and WS Form Pro management through MCP and authenticated REST.
 
 This independent GPL-2.0-or-later plugin is not an official GeneratePress or WP
@@ -158,3 +159,24 @@ Future release checks target the latest stable WordPress version only.
 Coding checks resolve the latest stable WordPress Coding Standards rules and the
 latest PHP_CodeSniffer checker they officially support. The check log records
 the installed package versions.
+
+## Website configuration in 1.8.0
+
+**Settings → Website Connector → Website configuration** includes **Prevent Imagify
+from optimising PDFs**. It uses the documented `imagify_get_mime_types` filter to
+remove only `pdf`, across ordinary uploads, bulk/manual optimisation and background
+workers, independently of MCP sign-in. Images and other code’s exclusions stay in
+place. Requires Imagify 2.3.1+; verified with 2.3.5. Missing/inactive Imagify is harmless.
+
+New and upgrading installations enable protection when no choice is saved. Explicit
+off/on choices survive later upgrades, reactivation and site rebinding. Copied site
+settings stay paused until administrator review and save. Settings and diagnostics
+report both the saved preference and effective state.
+
+Exclusion preserves each PDF’s existing information. It does not assign languages,
+rewrite PDFs or repair previously optimised files; restoration/replacement is
+separate work. Imagify’s PDF displays and restore controls may be unavailable while
+PDF support is excluded. The small configuration module retains the connector’s
+existing identity and update channel. See [the plugin guide](readme.txt).
+
+[Official filter reference](https://imagify.io/documentation/imagify-optimization-filter-hooks/).
