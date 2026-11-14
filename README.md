@@ -150,3 +150,11 @@ information is temporarily unavailable. The updater declares support for its own
 plugin entry; it does not invent an update offer, force an update preference or
 bypass website policy. The one-time installation default from 1.7.3 is unchanged.
 Upgrading an earlier installation does not silently opt it into auto-updates.
+
+Version 1.7.4 was also verified on WordPress 7.1.4 (the latest stable release at
+publication) with PHP 8.3.36, including native update controls and fresh setup.
+Future release checks target the latest stable WordPress version only.
+
+Coding checks resolve the latest stable WordPress Coding Standards rules and the
+latest PHP_CodeSniffer checker they officially support. The check log records
+the installed package versions.

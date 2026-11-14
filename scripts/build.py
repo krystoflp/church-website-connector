@@ -34,7 +34,7 @@ def main():
         'version': version,
         'requires': re.search(r'Requires at least: ([0-9.]+)', header).group(1),
         'requires_php': re.search(r'Requires PHP: ([0-9.]+)', header).group(1),
-        'tested': '7.0.8',
+        'tested': '7.1.4',
         'sha256': digest,
     }
     manifest = output / (SLUG + '-' + version + '.json')
