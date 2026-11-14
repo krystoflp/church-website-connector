@@ -116,6 +116,7 @@ function connection_status( $input = [] ) {
         'pdf_upload' => [ 'enabled' => feature_enabled( 'rest_tools' ), 'current_user_can_upload' => ! is_wp_error( PdfUpload\permission() ), 'max_bytes' => min( PdfUpload\MAX_BYTES, wp_max_upload_size() ) ],
         'generatepress_oauth_bridge' => GeneratePressBridge\status(),
         'redirection' => RedirectionTools\readiness(),
+        'integrations' => array_map( '\ChurchWebsiteConnector\Integrations\status', array_keys( Integrations\FLAGS ) ),
         'used_css' => [
             'ready' => ! is_wp_error( $ready ),
             'message' => is_wp_error( $ready ) ? $ready->get_error_message() : 'Native Used CSS services are ready.',
@@ -158,7 +159,7 @@ function admin_save(): void {
     }
     check_admin_referer( 'church_connector_save' );
     $flags = [];
-    foreach ( [ 'enabled', 'compatibility', 'codex', 'used_css', 'rest_tools', 'redirection_tools', 'generatepress_bridge' ] as $key ) {
+    foreach ( [ 'enabled', 'compatibility', 'codex', 'used_css', 'rest_tools', 'redirection_tools', 'generatepress_bridge', 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools' ] as $key ) {
         $flags[ $key ] = isset( $_POST[ $key ] ) && $_POST[ $key ] === '1';
     }
     $result = configure( $flags );
@@ -221,6 +222,9 @@ function admin_page(): void {
             . ( $status['redirection']['plugin_version'] ? 'Installed: ' . $status['redirection']['plugin_version'] . '. ' : 'Not active. ' ) . $status['redirection']['message'],
         'Used CSS clearing' => $status['used_css']['ready'] ? ( $status['used_css']['current_user_can_clear'] ? 'Ready for this administrator' : 'Save the settings below to grant your clearing permission.' ) : $status['used_css']['message'],
     ];
+    foreach ( $status['integrations'] as $integration ) {
+        $rows[$integration['label'] . ' (optional)'] = ( $integration['enabled'] ? 'Enabled. ' : 'Switched off. ' ) . ( $integration['installed_version'] ? 'Installed: ' . $integration['installed_version'] . '. ' : 'Not active. ' ) . ( $integration['compatible'] ? 'Compatible native interfaces.' : 'Requires native setup and supported version ' . $integration['supported_versions'] . '.' );
+    }
     foreach ( $rows as $label => $message ) {
         echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( $message ) . '</td></tr>';
     }
@@ -229,7 +233,7 @@ function admin_page(): void {
     echo '<h2>2. Enable the connection helpers</h2><form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
     wp_nonce_field( 'church_connector_save' );
     echo '<input type="hidden" name="action" value="church_connector_save"><fieldset><legend class="screen-reader-text">Connection helpers for this website</legend>';
-    $options = [ 'enabled' => 'Enable the helpers on this website', 'compatibility' => 'Keep GeneratePress and WP Rocket sign-in discovery compatible', 'codex' => 'Allow official Codex sign-in through the alternative WP Rocket connection', 'used_css' => 'Enable protected Used CSS clearing for an authorised administrator', 'rest_tools' => 'Enable page, post and media details and PDF uploads through this website connection', 'redirection_tools' => 'Enable Redirection management through MCP (requires the Redirection plugin; changes use previews and approval)', 'generatepress_bridge' => 'Use one GeneratePress connection for the enabled connector and WP Rocket tools' ];
+    $options = [ 'enabled' => 'Enable the helpers on this website', 'compatibility' => 'Keep GeneratePress and WP Rocket sign-in discovery compatible', 'codex' => 'Allow official Codex sign-in through the alternative WP Rocket connection', 'used_css' => 'Enable protected Used CSS clearing for an authorised administrator', 'rest_tools' => 'Enable page, post and media details and PDF uploads through this website connection', 'redirection_tools' => 'Enable Redirection management through MCP (requires the Redirection plugin; changes use previews and approval)', 'tsf_tools' => 'Enable The SEO Framework page/post and site-wide SEO tools (changes require approval)', 'rankmath_tools' => 'Enable Rank Math page/post and site-wide SEO tools (changes require approval)', 'snippets_tools' => 'Enable Code Snippets management (code execution requires explicit approval)', 'wsform_tools' => 'Enable WS Form Pro design and settings tools (submission records are excluded)', 'generatepress_bridge' => 'Use one GeneratePress connection for the enabled connector and WP Rocket tools' ];
     foreach ( $options as $key => $label ) {
         $description = $key === 'codex' ? ' aria-describedby="cwc-codex-access"' : ( $key === 'generatepress_bridge' ? ' aria-describedby="cwc-gp-bridge-access"' : '' );
         echo '<p><label><input type="checkbox" name="' . esc_attr( $key ) . '" value="1"' . $description . checked( ( $saved[ $key ] ?? ( $key === 'rest_tools' ) ) === true, true, false ) . '> ' . esc_html( $label ) . '</label></p>';
@@ -253,6 +257,7 @@ function admin_page(): void {
     echo '<p><label for="cwc-setup-prompt"><strong>Copy this message into your website project chat</strong></label></p><textarea class="large-text" id="cwc-setup-prompt" rows="12" readonly>' . esc_textarea( $prompt ) . '</textarea>';
     echo '<p>The tested client is native Codex desktop. The Codex trust helper above applies to the separate WP Rocket route; the primary connection uses GeneratePress’s native sign-in. Other clients must support the selected provider’s OAuth flow. This page checks local readiness, not completed sign-in, tool discovery or a successful upload.</p>';
     echo '<h2>Automatic updates</h2><p>Updates are available from the connector’s published GitHub releases. To receive them automatically, open <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Installed Plugins</a> and enable auto-updates for Church Website Connector. Your website’s update policy and schedule apply.</p>';
+    echo '<h2>Optional plugin integrations</h2><p>The SEO Framework, Rank Math, Code Snippets and WS Form Pro each have a separate switch above. After enabling one, refresh your connection and start with integration-capabilities. Read the item, review a preview, then apply only after approval. Code-executing changes require a separate acknowledgement. WS Form tools cover form design and selected settings; submission records and notification credentials are excluded.</p>';
     echo '<h2>Page, post and media details</h2><p>Use the selected website connection to inspect supported details, featured images, categories and existing media descriptions or alt text. Changes to existing details require a reviewed preview belonging to the signed-in account, and are rejected if the item changed. GeneratePress handles block content and draft authoring. WordPress permissions still apply; no separate REST connection or password is needed.</p>';
     echo '<h2>PDF uploads</h2><p>Give your assistant a PDF file and ask it to upload it through this website connection. The current website limit is <strong>' . esc_html( $pdf_limit ) . ' per PDF</strong>; client request limits may be lower. The connected account must have permission to upload files, and the page, post and media details and PDF uploads checkbox must be enabled.</p>';
     echo '<p>PDFs are stored as public Media Library files. You can supply a title, caption and description, or ask to attach the file to a page or post your account can edit. The assistant returns the file’s public address for linking. A new upload creates an attachment directly when requested; it does not use a metadata preview token or publish a page. If an upload result is uncertain, check the Media Library before retrying to avoid a duplicate.</p>';
