@@ -25,3 +25,11 @@ if ( function_exists( 'wp_unschedule_hook' ) ) { wp_unschedule_hook( 'church_con
 
 foreach ( [ 'church_connector_redirect_lock', 'church_connector_redirect_audit' ] as $option ) { delete_option( $option ); }
 if ( function_exists( 'wp_unschedule_hook' ) ) { wp_unschedule_hook( 'church_connector_expire_redirect_preview' ); }
+
+// Remove bounded integration previews, locks and expiry events; preserve vendor data.
+if ( isset( $wpdb ) && is_callable( [ $wpdb, 'get_col' ] ) ) {
+    $names = $wpdb->get_col( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $wpdb->esc_like( 'church_connector_integration_preview_' ) . '%', $wpdb->esc_like( 'church_connector_integration_lock_' ) . '%' ) );
+    foreach ( $names as $name ) { delete_option( $name ); }
+}
+delete_option( 'church_connector_integration_audit' );
+if ( function_exists( 'wp_unschedule_hook' ) ) { wp_unschedule_hook( 'church_connector_expire_integration_preview' ); }

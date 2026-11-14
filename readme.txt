@@ -1,13 +1,13 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.5.0
+Stable tag: 1.6.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
 One reusable WordPress plugin for GeneratePress AI, WP Rocket and protected
 website tools through MCP. It adds PDF uploads, page/post/media metadata tools,
-optional Redirection management and Used CSS clearing. Install the same ZIP on
+optional Redirection, SEO, snippet and form-design management and Used CSS clearing. Install the same ZIP on
 each compatible website; no site-specific code or ZIP rebuild is needed.
 
 == Connection options ==
@@ -60,7 +60,7 @@ Used CSS services are available, saving settings can grant only the current
 eligible administrator the connector's separate Used CSS clearing permission.
 
 Activation enables the standard connection helpers on the saved website addresses.
-Redirection and the GeneratePress bridge require their separate opt-ins. Settings
+Redirection, the four plugin integrations and the GeneratePress bridge require separate opt-ins. Settings
 can disable individual features. Reactivation on the same installation preserves
 saved choices. The plugin binds to WordPress's saved HTTPS Site Address and
 WordPress Address, not the request Host header or a client-supplied URL. A copied
@@ -118,6 +118,82 @@ Missing dependencies and identifiable outdated adapters produce administrator
 warnings. Dependencies, commercial licences and vendor MCP servers are not bundled
 or replaced. Local readiness, the client’s OAuth support, native sign-in and the
 connected account's permissions must all be checked on the intended website.
+
+== Optional SEO, snippet and form integrations (1.6.0) ==
+
+Enable each integration separately in Settings > Website Connector. New switches
+start off, including on upgrade; existing choices are preserved. Refresh the
+connected client's tools after saving. Both the existing MCP connection and six
+fixed authenticated REST endpoints expose the same protected operations. All
+require an administrator on this connector's bound website plus native plugin
+permissions. No new role, licence or OAuth grant is created.
+
+Supported and locally tested native plugins:
+* The SEO Framework >=5.2.1 <5.3; tested 5.2.1. Page/post titles, descriptions,
+  canonical URLs, robots flags, social metadata and search/archive exclusions;
+  selected site-wide homepage/title/social/indexing and sitemap settings.
+* Rank Math >=1.0.282 <1.1; tested Free 1.0.282. Page/post SEO, focus keywords,
+  robots and social fields; selected general, titles and sitemap settings. Finish
+  native setup (including its normal free-account skip option if preferred).
+* Code Snippets >=4.1.0 <4.2; tested Free 4.1.0. List/read, create inactive, edit,
+  activate, deactivate and move site snippets to Trash. Locked/trashed/network
+  snippets and permanent deletion are excluded. PHP syntax is checked during
+  preview; native validation during apply can execute code. Activation and edits
+  to active snippets require explicit code-execution approval and
+  acknowledge_code_execution=true. Syntax validation cannot establish safety.
+* WS Form PRO >=1.12.20 <1.13; tested Pro 1.12.20. List/read form designs, create
+  drafts, edit labels, fields and layouts, add/update/remove fields, sections and
+  tabs, and publish/unpublish. Selected per-form settings are label_render_off,
+  submit_on_enter and invalid_field_focus. Existing actions/conditionals remain
+  server-side; native deletion repairs references to removed design items. Submission responses, exports, resend actions,
+  notification credentials, licence settings and global WS Form options are not
+  exposed. Native auto-publishing, when enabled, can publish design edits;
+  editing such a published form also requires native publish_form permission.
+
+Version ranges are guards, not claims that every version in a range was tested.
+Unsupported/missing native interfaces pause the integration. Only the documented
+editable subset is available; use integration-capabilities for exact schemas.
+WS Form field metadata follows its native AI schema (for example required='on'
+or ''), and preserves existing IDs/types in full-design updates. Use structural
+operations for adding/removing items. Designs are bounded to 20 tabs, 100 sections,
+100 fields and 256 KiB; lists return at most 50 items per request.
+
+MCP ability names (prefix church-connector/):
+* integration-capabilities
+* list-integration-items
+* get-integration-item
+* preview-integration-change
+* apply-integration-change
+* discard-integration-change
+
+REST paths use /wp-json/church-connector/v1/integrations/<ability-name>.
+Capabilities/list/get use GET; preview/apply/discard use POST. Use standard
+WordPress authentication over HTTPS: existing cookie sign-in with a REST nonce,
+or an authorised account's Application Password where an external REST client
+needs it. MCP clients continue using the existing native connection; they do not
+need a new REST credential. Anonymous access is denied. Raw Abilities REST
+execution is hidden, so it cannot bypass the preview workflow.
+
+Every request identifies the exact saved site_url. Item requests include
+integration (seo-framework, rank-math, code-snippets, ws-form), kind (post,
+settings, snippet, form) and integer id. SEO settings use id=0; Rank Math settings
+also require section=general, titles or sitemap. Read the current state_hash,
+preview one operation with changes, review its returned diff and effects, then
+apply preview_token with approved=true only after the user's approval. Creating
+snippets/forms uses id=0 and operation=create. Publishing and snippet activation
+need separate previews; a new form is a draft and a new snippet is inactive.
+
+One integration preview per account expires after 15 minutes. Tokens are bound
+to the account, website, installed plugin version and current item/settings state;
+replacement, expiry, site moves, disabled switches or changed state prevent use.
+Native permissions are rechecked before execution. Only token hashes are stored.
+A per-item connector lock and single-use consumption prevent duplicate connector
+writes; native editors are not locked. Saved results are read back. A failure may
+follow a partial native change: inspect the item before retrying. The bounded
+50-entry audit stores field names and outcomes, without code, values or tokens.
+Uninstall removes connector previews/audit and preserves native plugin data.
+Approval is an acknowledgement supplied by the client, not a separate human
+confirmation screen in WordPress. Assistants must obtain actual user approval.
 
 == Authentication and access ==
 
@@ -333,6 +409,12 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.6.0 =
+* Add optional authenticated REST and MCP access to The SEO Framework and Rank Math page/post and site-wide SEO settings.
+* Add Code Snippets Free management with previews and explicit code-execution acknowledgement.
+* Add WS Form Pro design and selected form settings with native permissions and preview/approval.
+* Keep all four integration switches off until explicitly enabled; exclude submission records and vendor credentials.
 
 = 1.5.0 =
 * Add WordPress-native updates from published stable GitHub releases.

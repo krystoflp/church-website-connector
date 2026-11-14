@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Church Website Connector
  * Description: Prepares GeneratePress AI and WP Rocket connections, allows the official Codex client, and adds protected Used CSS, PDF upload, REST-backed metadata and Redirection management tools through MCP.
- * Version: 1.5.0
+ * Version: 1.6.0
  * Requires at least: 7.0
  * Requires PHP: 8.3
  * Author: Church Website Toolkit
@@ -17,7 +17,7 @@ namespace ChurchWebsiteConnector;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 const SETTINGS = 'church_website_connector_settings';
 
 function settings(): array {
@@ -119,6 +119,7 @@ function configure( array $flags ) {
     }
     $saved['rest_tools'] = ( $flags['rest_tools'] ?? true ) === true;
     $saved['redirection_tools'] = ( $flags['redirection_tools'] ?? false ) === true;
+    foreach ( [ 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools' ] as $key ) { $saved[$key] = ( $flags[$key] ?? false ) === true; }
     // Off on upgrade and activation: this changes the native GP endpoint's tool scope.
     $saved['generatepress_bridge'] = ( $flags['generatepress_bridge'] ?? false ) === true;
     update_option( SETTINGS, $saved, false );
@@ -150,6 +151,7 @@ require_once __DIR__ . '/includes/rest-tools.php';
 require_once __DIR__ . '/includes/pdf-upload.php';
 require_once __DIR__ . '/includes/redirection-tools.php';
 require_once __DIR__ . '/includes/generatepress-bridge.php';
+require_once __DIR__ . '/includes/integration-tools.php';
 require_once __DIR__ . '/includes/admin.php';
 require_once __DIR__ . '/includes/updates.php';
 

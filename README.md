@@ -2,7 +2,7 @@
 
 A reusable WordPress plugin for GeneratePress AI and WP Rocket connections,
 protected Used CSS operations, PDF uploads, page/post/media metadata and optional
-Redirection management through MCP.
+Redirection, The SEO Framework, Rank Math, Code Snippets and WS Form Pro management through MCP and authenticated REST.
 
 This independent GPL-2.0-or-later plugin is not an official GeneratePress or WP
 Rocket product. Vendor plugins and commercial licences are separate.
@@ -31,6 +31,22 @@ are preserved. A GitHub outage leaves the installed connector running.
 Use the attached installation ZIP. GitHub's automatic source archives also
 contain development files and are not the prepared installation package.
 
+## Optional integrations in 1.6.0
+
+Enable the integrations separately in **Settings → Website Connector**, then
+refresh your connection. The SEO Framework and Rank Math cover individual SEO
+fields and selected site-wide settings, including sitemaps. Code Snippets Free
+supports reviewed management; new snippets stay inactive, and activation or
+active-code edits require explicit code-execution approval. WS Form Pro covers
+form design and selected per-form settings, with separate draft/publish steps.
+Submission records, notification credentials and licence settings are excluded.
+
+All changes use a current-state read, a concrete preview and a short-lived,
+account-bound approval token. Native plugin permissions and version guards apply.
+See [the plugin guide](readme.txt) for supported versions, exact scope, six tool
+names and authenticated REST paths. These integrations start switched off after
+upgrading; automatic updates preserve existing feature choices.
+
 ## Development and releases
 
 This repository contains the distributable connector and portable release tools.
@@ -38,7 +54,7 @@ The wider development toolkit, site profiles and private verification records
 are maintained separately. Do not add website configuration, credentials,
 licence keys, vendor fixtures or client data here.
 
-Run `php tests/updates.php` for the isolated updater boundary checks, lint the PHP
+Run `php tests/updates.php` and `php tests/integrations.php` for the isolated updater boundary checks, lint the PHP
 files, and run `python3 scripts/build.py` to produce a deterministic ZIP, release
 metadata and checksum in `dist/`. The complete connector regression and isolated
 WordPress upgrade checks are run in the maintained development toolkit before a
