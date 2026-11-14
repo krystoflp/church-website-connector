@@ -1,14 +1,28 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.7.4
+Stable tag: 1.8.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
 One reusable WordPress plugin for GeneratePress AI, WP Rocket and protected
-website tools through MCP. It adds PDF uploads, page/post/media metadata tools,
+website configuration and tools through MCP. It protects PDFs from Imagify optimisation and adds PDF uploads, page/post/media metadata tools,
 optional Redirection, SEO, snippet and form-design management and Used CSS clearing. Install the same ZIP on
 each compatible website; no site-specific code or ZIP rebuild is needed.
+
+== Website configuration: Imagify PDF protection ==
+
+In Settings → Website Connector → Website configuration, select “Prevent Imagify from optimising PDFs” to help preserve each PDF’s own language declaration and accessibility information. Only the pdf entry is removed through Imagify’s documented imagify_get_mime_types filter. Images and other code’s exclusions are preserved. Applies to automatic uploads, bulk/manual optimisation and background workers without an MCP connection.
+
+On for new installations and once on upgrade when the setting is missing. Explicit disabled/enabled choices are retained on later upgrades, reactivation and site rebinding. The existing site-binding rule pauses copied/moved settings until an administrator reviews and saves them. The module uses the existing settings form, permissions and nonce.
+
+Requires Imagify 2.3.1+; verified against 2.3.5. Harmless when Imagify is absent/inactive. Settings, connection status, diagnostic report and Site Health Info show the saved and effective states, including an unsupported version or conflicting filter. No external request is made by this feature.
+
+Prevention only: existing PDFs keep their current contents until separately restored or replaced. No language is assigned and no document is rewritten. PDF support exclusion also affects Imagify’s displays, statistics and restore controls; native recovery may need protection temporarily off as a separate controlled task. Already running remote jobs and other PDF processors are outside this setting.
+
+The separate configuration module broadens Church Website Connector beyond MCP/REST connectivity while retaining its name, identity and update mechanism.
+
+Official reference: https://imagify.io/documentation/imagify-optimization-filter-hooks/
 
 == Connection options ==
 
@@ -484,6 +498,13 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.8.0 =
+* Add a separate website configuration module and administrator control to prevent Imagify PDF optimisation, preserving each document’s existing language and accessibility information.
+* Remove only the pdf supported-format entry through Imagify’s documented filter (2.3.1+), across uploads, bulk, manual and background processing. Image optimisation and other exclusions are preserved.
+* Enable protection on fresh installation and once on upgrade when no choice exists; preserve explicit disabled and enabled choices during later upgrades, reactivation and site rebinding. Report saved and effective state in settings and safe diagnostics.
+* Exclusion prevents future optimisation; it does not repair previously optimised PDFs, assign languages or rewrite files. Plugin identity and GitHub update mechanism are unchanged.
+
 
 = 1.7.4 =
 * Enable Redirection management through MCP by default only on new installations; preserve existing settings and the required preview/approval workflow.

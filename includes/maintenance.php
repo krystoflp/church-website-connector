@@ -128,6 +128,15 @@ function diagnostic_report() {
 	foreach ( array( 'compatibility', 'codex', 'used_css', 'rest_tools', 'redirection_tools', 'generatepress_bridge', 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools' ) as $flag ) {
 		$report['helpers'][ $flag ] = Connector\feature_enabled( $flag );
 	}
+	$pdf = $status['imagify_pdf_protection'];
+	$report['configuration']['imagify_pdf_protection'] = array(
+		'enabled'          => $pdf['enabled'],
+		'effective'        => $pdf['effective'],
+		'imagify_active'   => $pdf['imagify_active'],
+		'imagify_version'  => version( $pdf['imagify_version'] ),
+		'filter_available' => $pdf['filter_available'],
+		'state'            => $pdf['state'],
+	);
 	foreach ( $status['integrations'] as $integration ) {
 		$report['integrations'][ $integration['integration'] ] = array(
 			'enabled'    => (bool) $integration['enabled'],
