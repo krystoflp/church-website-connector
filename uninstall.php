@@ -48,3 +48,10 @@ foreach ( array( 'church_connector_adapter_setup', 'church_connector_adapter_set
 foreach ( array( 'church_connector_update_status', 'church_connector_auto_default_connector', 'church_connector_auto_default_adapter' ) as $option ) {
 	delete_option( $option );
 }
+
+foreach ( array( 'church_connector_generatepress_pair', 'church_connector_generatepress_setup', 'church_connector_generatepress_lock', 'church_connector_auto_default_generatepress' ) as $option ) {
+	delete_option( $option );
+}
+if ( function_exists( 'wp_unschedule_hook' ) ) {
+	wp_unschedule_hook( 'church_connector_expire_generatepress_pair' );
+}
