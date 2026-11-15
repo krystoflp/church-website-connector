@@ -147,7 +147,7 @@ function render_notice(): void {
 
 /** Keep the deliberate restore action visible beside the connector summary. */
 function render(): void {
-	echo '<section aria-labelledby="cwc-defaults-title"><h2 id="cwc-defaults-title">' . esc_html__( 'Restore connector defaults', 'church-website-connector' ) . '</h2><p id="cwc-defaults-help">' . esc_html__( 'Enable all connector settings and configuration options, including tools for existing authorised GeneratePress connections. Leave “Allow official Codex sign-in through the alternative WP Rocket connection” disabled. Enable automatic updates for Website Connector itself and the installed plugins listed below, subject to website policy. This does not install plugins, activate licences or run updates now.', 'church-website-connector' ) . '</p><p>' . esc_html( implode( ', ', plugins() ) ) . '.</p>';
+	echo '<section aria-labelledby="cwc-defaults-title"><h3 id="cwc-defaults-title">' . esc_html__( 'Restore connector defaults', 'church-website-connector' ) . '</h3><p id="cwc-defaults-help">' . esc_html__( 'Enable all connector settings and configuration options, including tools for existing authorised GeneratePress connections. Leave “Allow official Codex sign-in through the alternative WP Rocket connection” disabled. Enable automatic updates for Website Connector itself and the installed plugins listed below, subject to website policy. This does not install plugins, activate licences or run updates now.', 'church-website-connector' ) . '</p><p>' . esc_html( implode( ', ', plugins() ) ) . '.</p>';
 	if ( Connector\is_bound() && current_user_can( 'update_plugins' ) ) {
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 		wp_nonce_field( ACTION );

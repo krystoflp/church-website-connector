@@ -88,6 +88,43 @@ function auto_status( string $file ): array {
 	);
 }
 
+/** Report the enabled route to connector tools for new Codex MCP connections. */
+function primary_connection(): array {
+	$selected = true === ( Connector\settings()['generatepress_bridge'] ?? false );
+	$codex    = true === ( Connector\settings()['codex'] ?? false );
+	$bound    = Connector\is_bound();
+	$ready    = Connector\feature_enabled( 'generatepress_bridge' ) && Connector\GeneratePressBridge\environment_ready();
+	$rocket   = Connector\feature_enabled( 'codex' ) && defined( 'WP_ROCKET_VERSION' ) && class_exists( '\\WPMedia\\MCP\\OAuth\\Bootstrap' ) && Connector\AdapterSetup\status()['compatible'];
+	$mode     = $selected ? 'generatepress' : ( $codex ? 'separate_connections' : 'none' );
+	if ( $selected ) {
+		$label   = __( 'GeneratePress', 'church-website-connector' );
+		$state   = $ready ? 'ready' : 'setup_required';
+		$message = __( 'The enabled WordPress and plugin tools use the GeneratePress MCP connection. Native sign-in and each tool’s settings and permissions still apply.', 'church-website-connector' );
+	} elseif ( $codex ) {
+		$label   = __( 'WP Rocket — separate MCP connection', 'church-website-connector' );
+		$state   = $rocket ? 'separate_connections' : 'setup_required';
+		$message = __( 'The enabled WordPress and plugin tools require a separate WP Rocket MCP connection and native sign-in. GeneratePress supplies its own authoring tools independently.', 'church-website-connector' );
+	} else {
+		$label   = __( 'No MCP route enabled for new Codex connections', 'church-website-connector' );
+		$state   = 'connections_disabled';
+		$message = __( 'Both connection options are disabled. Enable “Use one GeneratePress connection for the enabled connector and WP Rocket tools” (recommended), or “Allow official Codex sign-in through the alternative WP Rocket connection”, to access the enabled WordPress and plugin tools through MCP. GeneratePress’s own authoring connection is unaffected. Existing authorised connections are not revoked.', 'church-website-connector' );
+	}
+	if ( ! $bound ) {
+		$state  = 'website_review_required';
+		$label .= __( ' — website review required', 'church-website-connector' );
+	} elseif ( 'setup_required' === $state ) {
+		$label .= __( ' — setup or compatibility needs attention', 'church-website-connector' );
+	}
+	return array(
+		'selected'     => $mode,
+		'bridge_ready' => $ready,
+		'state'        => $state,
+		'label'        => $label,
+		'message'      => $message,
+		'level'        => 'connections_disabled' === $state ? 'yellow' : ( in_array( $state, array( 'ready', 'separate_connections' ), true ) ? 'green' : 'red' ),
+	);
+}
+
 /** Strict version-only fields prevent arbitrary plugin strings entering copied diagnostics. */
 function version( $value ): ?string {
 	return is_string( $value ) && strlen( $value ) <= 32 && 1 === preg_match( '/\A[0-9]+(?:\.[0-9]+){1,3}\z/', $value ) ? $value : null;
@@ -112,17 +149,18 @@ function diagnostic_report() {
 		return $status;
 	}
 	$report = array(
-		'connector'             => Connector\VERSION,
-		'wordpress'             => version( $GLOBALS['wp_version'] ?? null ),
-		'php'                   => PHP_VERSION,
-		'website_binding_valid' => (bool) $status['enabled_on_current_site'],
-		'primary_connection'    => $status['generatepress_oauth_bridge']['enabled'] && $status['generatepress_oauth_bridge']['compatible'] ? 'generatepress' : 'separate_connections',
-		'dependencies'          => array(),
-		'helpers'               => array(),
-		'integrations'          => array(),
-		'updates'               => update_status(),
-		'auto_updates'          => array(),
-		'verification'          => 'Local readiness only; native client sign-in must be checked from that client.',
+		'connector'                 => Connector\VERSION,
+		'wordpress'                 => version( $GLOBALS['wp_version'] ?? null ),
+		'php'                       => PHP_VERSION,
+		'website_binding_valid'     => (bool) $status['enabled_on_current_site'],
+		'primary_connection'        => $status['primary_connection']['selected'],
+		'primary_connection_status' => $status['primary_connection']['state'],
+		'dependencies'              => array(),
+		'helpers'                   => array(),
+		'integrations'              => array(),
+		'updates'                   => update_status(),
+		'auto_updates'              => array(),
+		'verification'              => 'Local readiness only; native client sign-in must be checked from that client.',
 	);
 	foreach ( array( 'wordpress_abilities', 'mcp_adapter', 'wp_rocket_oauth' ) as $key ) {
 		$report['dependencies'][ $key ] = (bool) $status['dependencies'][ $key ];
@@ -182,12 +220,27 @@ function render_summary( array $status ): void {
 		__( 'GeneratePress AI automatic updates', 'church-website-connector' ) => auto_status( Connector\GeneratePressSetup\PLUGIN_FILE )['message'],
 		__( 'Last release check', 'church-website-connector' ) => format_time( $updates['last_attempt'] ) . ' — ' . $result,
 		__( 'Last successful release check', 'church-website-connector' ) => format_time( $updates['last_success'] ),
-		__( 'Primary connection', 'church-website-connector' ) => $status['generatepress_oauth_bridge']['enabled'] && $status['generatepress_oauth_bridge']['compatible'] ? __( 'GeneratePress', 'church-website-connector' ) : __( 'Separate GeneratePress and WP Rocket connections', 'church-website-connector' ),
+		__( 'WordPress and plugin tools through MCP', 'church-website-connector' ) => $status['primary_connection']['label'],
 		__( 'MCP Adapter setup', 'church-website-connector' ) => Connector\AdapterSetup\presentation()['message'],
 	);
-	echo '<section aria-labelledby="cwc-summary"><h2 id="cwc-summary">' . esc_html__( 'Connector status', 'church-website-connector' ) . '</h2><table class="widefat striped"><caption class="screen-reader-text">' . esc_html__( 'Connector and update status', 'church-website-connector' ) . '</caption><tbody>';
+	echo '<section aria-labelledby="cwc-summary"><h3 id="cwc-summary">' . esc_html__( 'Connector status', 'church-website-connector' ) . '</h3><table class="widefat striped"><caption class="screen-reader-text">' . esc_html__( 'Connector and update status', 'church-website-connector' ) . '</caption><tbody>';
+	$auto_level = static function ( string $file ): string {
+		$auto = auto_status( $file );
+		return ! $auto['available'] || 'disabled' === $auto['policy'] ? 'red' : ( $auto['selected'] || 'enabled' === $auto['policy'] ? 'green' : 'yellow' );
+	};
+	$levels     = array(
+		__( 'Latest known stable release', 'church-website-connector' ) => $updates['latest'] ? 'green' : 'yellow',
+		__( 'Connector automatic updates', 'church-website-connector' ) => $auto_level( Updates\plugin_file() ),
+		__( 'MCP Adapter automatic updates', 'church-website-connector' ) => $auto_level( Connector\AdapterSetup\PLUGIN_FILE ),
+		__( 'GeneratePress AI automatic updates', 'church-website-connector' ) => $auto_level( Connector\GeneratePressSetup\PLUGIN_FILE ),
+		__( 'Last release check', 'church-website-connector' ) => 'failed' === $updates['result'] ? 'red' : ( 'success' === $updates['result'] ? 'green' : 'yellow' ),
+		__( 'Last successful release check', 'church-website-connector' ) => $updates['last_success'] ? 'green' : 'yellow',
+		__( 'WordPress and plugin tools through MCP', 'church-website-connector' ) => $status['primary_connection']['level'],
+		__( 'MCP Adapter setup', 'church-website-connector' ) => Connector\AdapterSetup\status()['compatible'] ? 'green' : 'red',
+	);
 	foreach ( $rows as $label => $value ) {
-		echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td' . ( __( 'MCP Adapter setup', 'church-website-connector' ) === $label ? ' data-cwc-adapter-message' : '' ) . '>' . esc_html( $value ) . '</td></tr>';
+		$level = $levels[ $label ] ?? 'green';
+		echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . Connector\Status\badge( $level, 'green' === $level ? __( 'OK', 'church-website-connector' ) : ( 'yellow' === $level ? __( 'Review', 'church-website-connector' ) : '' ) ) . '<span' . ( __( 'MCP Adapter setup', 'church-website-connector' ) === $label ? ' data-cwc-adapter-message' : '' ) . '>' . esc_html( $value ) . '</span></td></tr>';
 	}
 	echo '</tbody></table><p>' . esc_html__( 'Automatic updates follow WordPress scheduling, compatibility checks and hosting policy. Connection status is local readiness, not proof of client sign-in.', 'church-website-connector' ) . '</p>';
 	$issues = array_filter( Connector\dependency_issues(), static fn( array $issue ): bool => 'info' !== ( $issue['level'] ?? 'warning' ) );

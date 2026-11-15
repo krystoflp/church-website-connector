@@ -35,8 +35,8 @@ contain development files and are not the prepared installation package.
 
 ## Setup defaults in 1.7.0
 
-New setups preselect the single GeneratePress connection. Review existing
-GeneratePress clients and save to enable it. All four plugin helpers start
+Fresh installations enable the single GeneratePress connection immediately.
+Review existing authorised GeneratePress clients; native sign-in and consent remain required. All four plugin helpers start
 selected and wait when their plugin is absent or unsupported. Discovery
 compatibility stays on; direct WP Rocket Codex sign-in starts off. Existing
 websites retain their saved choices during updates and reactivation.
@@ -162,7 +162,7 @@ the installed package versions.
 
 ## Website configuration in 1.8.0
 
-**Settings → Website Connector → Website configuration** includes **Prevent Imagify
+**Settings → Website Connector → Settings** includes **Prevent Imagify
 from optimising PDFs**. It uses the documented `imagify_get_mime_types` filter to
 remove only `pdf`, across ordinary uploads, bulk/manual optimisation and background
 workers, independently of MCP sign-in. Images and other code’s exclusions stay in
@@ -207,7 +207,7 @@ licence form. GeneratePress AI's own updates use the licence saved on the websit
 
 ## Restore to defaults in 1.9.2
 
-Choose **Restore to defaults** beside the status summary to enable every connector
+Choose **Restore to defaults** in Settings to enable every connector
 setting and website configuration option, including Imagify PDF protection and the
 single GeneratePress connection. **Allow official Codex sign-in through the
 alternative WP Rocket connection** is set to disabled. The action enables tools
@@ -225,3 +225,37 @@ Restoration requires a deliberate administrator POST with its own action nonce
 and plugin-update permission on the reviewed, bound website. Opening settings,
 reactivation and automatic upgrades never restore defaults. Later manual choices
 remain until another deliberate restore.
+
+## Fresh connection defaults and consolidated settings in 1.9.3
+
+A fresh administrator activation saves and enables the single GeneratePress
+connection immediately, with alternative WP Rocket Codex trust off. That trust
+option is independent of the selected primary method. Existing saved choices,
+including an old unfinished setup or disabled bridge, are preserved. All checkboxes
+show their stored value; no unsaved preselection is substituted when rendering.
+Status, diagnostics, instructions and the actual provider use the same choice.
+Unavailable or unsupported GeneratePress setup is reported as needing attention,
+without relabelling the selected mode as separate connections.
+
+Status combines connector information, plugin readiness and PDF protection results.
+Green means ready or deliberately switched off; yellow means a waiting optional
+plugin or non-blocking step; red identifies a missing requirement or important
+problem. Every light has a text label. All 11 editable checkboxes, including PDF
+protection, share one Settings form. Restore to defaults is in that same area.
+
+## MCP access status in 1.9.4
+
+Status reports the enabled route to the additional WordPress and plugin tools
+through MCP for new Codex connections. GeneratePress is primary when its bridge
+is on. With the bridge off and alternative Codex sign-in on, the separate WP
+Rocket route is reported, including missing native library/adapter setup.
+With both options off, a yellow warning explains that no connector MCP route is
+enabled for new Codex connections and links to Settings. Locally ready enabled
+MCP helpers also wait in yellow until connection setup is complete; deliberately
+off helpers, native plugin presence and Imagify PDF protection retain their own
+states. Native GeneratePress authoring remains independent.
+
+The warning does not claim that existing authorised connections are revoked or
+that direct REST APIs have been disabled. The setup instructions and diagnostic
+state follow the same choices. No authentication, feature permission, saved
+preference, connection record or vendor REST policy is changed by this revision.

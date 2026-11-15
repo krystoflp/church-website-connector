@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.9.2
+Stable tag: 1.9.4
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -12,7 +12,7 @@ each compatible website; no site-specific code or ZIP rebuild is needed.
 
 == Website configuration: Imagify PDF protection ==
 
-In Settings → Website Connector → Website configuration, select “Prevent Imagify from optimising PDFs” to help preserve each PDF’s own language declaration and accessibility information. Only the pdf entry is removed through Imagify’s documented imagify_get_mime_types filter. Images and other code’s exclusions are preserved. Applies to automatic uploads, bulk/manual optimisation and background workers without an MCP connection.
+In Settings → Website Connector → Settings, select “Prevent Imagify from optimising PDFs” to help preserve each PDF’s own language declaration and accessibility information. Only the pdf entry is removed through Imagify’s documented imagify_get_mime_types filter. Images and other code’s exclusions are preserved. Applies to automatic uploads, bulk/manual optimisation and background workers without an MCP connection.
 
 On for new installations and once on upgrade when the setting is missing. Explicit disabled/enabled choices are retained on later upgrades, reactivation and site rebinding. The existing site-binding rule pauses copied/moved settings until an administrator reviews and saves them. The module uses the existing settings form, permissions and nonce.
 
@@ -32,21 +32,24 @@ Church Website Connector tools and the allowlisted WP Rocket tools. Complete the
 native GeneratePress sign-in and consent. A separate WP Rocket OAuth sign-in is
 not needed for those tools through this connection.
 
-The bridge supports GeneratePress AI >=1.0.0 <1.1.0. It is preselected during a new setup,
-and becomes enabled after an administrator reviews the existing authorised
-GeneratePress clients and saves the settings. Updates and reactivation preserve
+The bridge supports GeneratePress AI >=1.0.0 <1.1.0. Fresh administrator activation
+enables it immediately, matching the selected checkbox. Review existing authorised
+GeneratePress clients; native sign-in and consent still apply. Updates and reactivation preserve
 existing choices; older installations without this choice remain off. Only the fixed list of
 registered, MCP-public abilities is added. Native account permissions, feature
 switches and each tool's operation checks still apply.
 
-Without the bridge, use GeneratePress and WP Rocket as separate native OAuth
-connections. GeneratePress supplies its authoring tools; the WP Rocket gateway
+Without the bridge, Codex needs the alternative WP Rocket sign-in option enabled
+to establish a new separate WP Rocket MCP connection. GeneratePress supplies its authoring tools; the WP Rocket gateway
 supplies its native cache tools and the enabled connector tools. This remains an
-alternative setup, rather than a requirement for the single primary connection.
+alternative setup. With both connection options off, Status warns in yellow that
+no route is enabled for new Codex access to the additional WordPress and plugin
+tools. GeneratePress’s own authoring remains independent. Existing authorised
+connections are not revoked by these switches.
 
 Settings > Website Connector supplies both native MCP addresses and the
 GeneratePress authorisation-server metadata address. Its copyable setup message
-reflects whether the compatible bridge is enabled. Readiness checks do not prove
+reflects the saved connection method, with unavailable setup reported separately. Readiness checks do not prove
 that sign-in, client discovery or an upload has completed successfully.
 
 == Installation and updates ==
@@ -58,7 +61,7 @@ that sign-in, client discovery or an upload has completed successfully.
 3. Open the connector settings to complete setup. New setups automatically
    install or activate the separate official MCP Adapter when needed. Review the
    selected features and existing authorised GeneratePress clients, then save.
-   The recommended single GeneratePress connection is preselected for new setups.
+   The single GeneratePress connection is already enabled for a fresh installation.
 4. Copy the setup message from that page into your website project chat. Reuse an
    existing connection for this exact website where available. A new connection
    needs native website sign-in and consent. Keep passwords, tokens and licence
@@ -75,9 +78,8 @@ eligible administrator the connector's separate Used CSS clearing permission.
 
 Activation enables the selected connector features on the saved website addresses.
 New setups keep discovery compatibility on, leave alternative WP Rocket Codex
-sign-in off, and select all four plugin integrations. Redirection remains opt-in.
-The GeneratePress connection method is preselected and awaits the first settings
-save. Settings can disable individual features. Reactivation on the same installation preserves
+sign-in off, and select all four plugin integrations and Redirection.
+The single GeneratePress connection is enabled immediately on a fresh installation. Settings can disable individual features. Reactivation on the same installation preserves
 saved choices. The plugin binds to WordPress's saved HTTPS Site Address and
 WordPress Address, not the request Host header or a client-supplied URL. A copied
 database or changed address pauses the helpers until an administrator re-enables
@@ -88,7 +90,7 @@ product. Its public source and releases are at:
 https://github.com/krystoflp/church-website-connector
 Changes in vendor interfaces may need a connector update.
 
-== Setup defaults and MCP Adapter (1.7.0) ==
+== Setup defaults and MCP Adapter ==
 
 The plugin's normal activation/deactivation controls replace the former master
 "Enable the helpers on this website" checkbox. Reactivation resumes the selected
@@ -97,9 +99,8 @@ moved/copied websites stay paused until an administrator reviews and saves the
 settings for that address. Deactivation does not revoke native provider keys.
 The internal enabled/address binding remains a safeguard, not a checkbox.
 
-For a new setup, the single GeneratePress method is preselected, but its extended
-tool scope is enabled only after the first settings save. Review authorised
-GeneratePress clients before saving: every authorised client gets the enabled
+For a new setup, the single GeneratePress method and its extended tool scope are
+enabled during administrator activation. Review authorised GeneratePress clients: every authorised client gets the enabled
 connector and allowlisted WP Rocket tools. Individual permissions and approval
 requirements remain. Existing sites are not silently switched during upgrades.
 Discovery compatibility remains on; alternative direct WP Rocket Codex sign-in
@@ -498,6 +499,17 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.9.4 =
+* Status reports the enabled MCP route to the additional WordPress and plugin tools. Both connection options off shows a yellow warning instead of a green separate-connections claim.
+* Enabled tool helpers wait in yellow while MCP connection setup is needed; native GeneratePress authoring and Imagify PDF protection remain independent.
+* Connection instructions and diagnostics reflect both-off settings without changing sign-in permissions, saved choices or existing authorised connections.
+
+
+= 1.9.3 =
+* Apply the single GeneratePress connection on fresh installation, matching its checked setting immediately; keep alternative WP Rocket Codex sign-in disabled and preserve existing choices.
+* Use the saved primary mode consistently in status, diagnostics, checkbox state and connection instructions. Report unavailable GeneratePress setup separately instead of displaying a different connection choice.
+* Replace the website-plugin checklist with a Status section and accessible green, yellow and red indicators. Consolidate all editable choices in Settings and show PDF protection results only in Status.
 
 = 1.9.2 =
 * Add an explicit Restore to defaults button: enable every connector setting and configuration option except alternative WP Rocket Codex sign-in; enable automatic updates for Website Connector itself and the installed plugins listed in settings, respecting website policy.
