@@ -63,8 +63,11 @@ function rows( array $status ): array {
 	$add( 'pdf_protection', 'PDF protection (Imagify)', $protection['message'], $level, ! $protection['enabled'] );
 	$redirect = $status['redirection'];
 	$add( 'redirection', 'Redirection (optional)', ! $redirect['enabled'] ? 'Switched off in Settings.' : ( empty( $redirect['plugin_version'] ) ? 'Helper enabled; waiting for Redirection to be installed and activated.' : 'Installed: ' . $redirect['plugin_version'] . '. ' . $redirect['message'] ), optional_level( $redirect, 'plugin_version' ), ! $redirect['enabled'] );
-	$css = $status['used_css'];
-	$add( 'used_css', 'Used CSS clearing', ! $css['enabled'] ? 'Switched off in Settings.' : ( $css['ready'] ? ( $css['current_user_can_clear'] ? 'Ready for this administrator' : 'Save Settings as an eligible administrator to grant clearing permission.' ) : $css['message'] ), ! $css['enabled'] || ( $css['ready'] && $css['current_user_can_clear'] ) ? 'green' : ( $css['legacy_helpers_active'] ? 'yellow' : 'red' ), ! $css['enabled'] );
+	$css     = $status['used_css'];
+	$waiting = ! $css['ready'] && ! empty( $css['waiting_for_configuration'] );
+	$message = ! $css['enabled'] ? 'Switched off in Settings.' : ( $css['ready'] ? ( $css['current_user_can_clear'] ? 'Ready for this administrator' : 'Save Settings as an eligible administrator to grant clearing permission.' ) : ( $waiting ? 'WP Rocket Remove Unused CSS is switched off for this website. Clearing will be available if you choose to enable it in WP Rocket.' : $css['message'] ) );
+	$level   = ! $css['enabled'] || ( $css['ready'] && $css['current_user_can_clear'] ) ? 'green' : ( $waiting || $css['legacy_helpers_active'] ? 'yellow' : 'red' );
+	$add( 'used_css', 'Used CSS clearing', $message, $level, ! $css['enabled'] );
 	foreach ( $status['integrations'] as $integration ) {
 		$message = ! $integration['enabled'] ? 'Switched off in Settings.' : ( $integration['compatible'] ? 'Enabled and ready. Active version: ' . $integration['installed_version'] . '.' : ( $integration['installed_version'] ? 'Installed: ' . $integration['installed_version'] . '. Version or native interfaces are unsupported. Requires ' . $integration['supported_versions'] . '.' : 'Not active—helper waiting. Install and activate this optional plugin only if you want to use it.' ) );
 		$add( $integration['integration'], $integration['label'] . ' (optional)', $message, optional_level( $integration ), ! $integration['enabled'] );

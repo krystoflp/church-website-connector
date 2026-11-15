@@ -259,3 +259,12 @@ The warning does not claim that existing authorised connections are revoked or
 that direct REST APIs have been disabled. The setup instructions and diagnostic
 state follow the same choices. No authentication, feature permission, saved
 preference, connection record or vendor REST policy is changed by this revision.
+
+## Used CSS waiting status in 1.9.5
+
+When the Used CSS helper is enabled but WP Rocket's **Remove Unused CSS** option
+is switched off, Website plugins and features shows amber **Waiting**. The message
+explains that clearing becomes available if the administrator chooses to enable
+the option in WP Rocket. This configuration choice requires no corrective action.
+Missing native interfaces, unsupported versions and clearing-permission issues
+retain their error status. Reading the status changes no settings or caches.
