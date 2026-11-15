@@ -18,24 +18,19 @@ namespace {
         public function get_error_code(){return $this->code;}
         public function get_error_message(){return $this->message;}
     }
-    class WP_REST_Server { const CREATABLE='POST'; }
-    class Request {
-        public function __construct(public $code='',public $input=[]){}
-        public function get_header($name){return $this->code;}
-        public function get_json_params(){return $this->input;}
-    }
     $options=[];$owner=1;$bound=true;$identity=['home'=>'https://church.example','wordpress'=>'https://church.example'];
     $capabilities=[1=>['manage_options'=>true,'install_plugins'=>true,'activate_plugins'=>true]];
-    $file_mod_allowed=true;$requests=[];$response=[];$http_code=200;$checks=0;$routes=[];
+    $file_mod_allowed=true;$requests=[];$response=[];$http_code=200;$checks=0;$routes=[];$hooks=[];$scheduled=['unrelated'=>true,'church_connector_expire_generatepress_pair'=>true];
     function __($text,$domain=''){return $text;}
-    function add_action(...$args){}
+    function add_action($hook,$callback,...$args){$GLOBALS['hooks'][$hook]=$callback;}
     function get_current_user_id(){return $GLOBALS['owner'];}
     function is_user_logged_in(){return $GLOBALS['owner']>0;}
     function user_can($id,$cap){return $GLOBALS['capabilities'][$id][$cap]??false;}
     function wp_is_file_mod_allowed($context){return $GLOBALS['file_mod_allowed'];}
     function get_option($name,$default=false){return $GLOBALS['options'][$name]??$default;}
     function update_option($name,$value,...$args){$GLOBALS['options'][$name]=$value;return true;}
-    function wp_schedule_single_event(...$args){return true;}
+    function delete_option($name){unset($GLOBALS['options'][$name]);}
+    function wp_unschedule_hook($hook){unset($GLOBALS['scheduled'][$hook]);}
     function rest_url($path){return 'https://church.example/wp-json/'.$path;}
     function is_wp_error($value){return $value instanceof WP_Error;}
     function wp_parse_url($url){return parse_url($url);}
@@ -52,25 +47,13 @@ namespace {
     if(!is_file($source))$source=dirname(__DIR__).'/includes/generatepress-setup.php';
     require $source;
     use ChurchWebsiteConnector\GeneratePressSetup as G;
-    G\register_route();
-    check(count($routes)===1&&$routes[G\ROUTE]['methods']==='POST','Exactly one POST setup route');
-    $owner=0;check(is_wp_error(G\create_pairing()),'Anonymous authorisation denied');$owner=1;
-    $pair=G\create_pairing();$saved=get_option(G\PAIR);$request=new Request($pair['code']);
-    check(strlen($pair['code'])===64&&$saved['hash']===hash('sha256',$pair['code']),'Random code is stored only as a fingerprint');
-    check(!str_contains(json_encode($saved),$pair['code']),'Authorisation record does not retain its secret');
-    check(G\rest_permission($request)===true,'Scoped authorisation works');
-    foreach(['',str_repeat('a',63),str_repeat('A',64),str_repeat('0',64),$pair['code']."\n"] as $bad)check(is_wp_error(G\rest_permission(new Request($bad))),'Malformed or wrong setup code denied');
-    $options[G\PAIR]['expires']=time()-1;check(is_wp_error(G\rest_permission($request)),'Expiry checked');$options[G\PAIR]=$saved;
-    $options[G\PAIR]['expires']=time()+601;check(is_wp_error(G\rest_permission($request)),'Excess lifetime rejected');$options[G\PAIR]=$saved;
-    $identity['home']='https://moved.example';check(is_wp_error(G\rest_permission($request)),'Moved site rejected');$identity['home']='https://church.example';
-    $bound=false;check(is_wp_error(G\rest_permission($request)),'Disabled binding rejected');$bound=true;
-    foreach(['manage_options','install_plugins','activate_plugins'] as $cap){$capabilities[1][$cap]=false;check(is_wp_error(G\rest_permission($request)),'Owner permission revocation checked');$capabilities[1][$cap]=true;}
-    $file_mod_allowed=false;check(is_wp_error(G\rest_permission($request)),'Filesystem policy checked');$file_mod_allowed=true;
-    foreach([[],['license_key'=>''],['license_key'=>'bad key'],['license_key'=>[]],['license_key'=>str_repeat('a',257)],['license_key'=>'FAKE','url'=>'https://other.example']] as $input){
-        check(is_wp_error(G\rest_setup(new Request($pair['code'],$input)))&&get_option(G\PAIR)===$saved,'Invalid body denied without consuming code');
-    }
-    check(!$requests,'Rejected requests never contact vendor');
-    $next=G\create_pairing();check(is_wp_error(G\rest_permission($request)),'Replacement code revokes previous generation');
+    check(!isset($hooks['rest_api_init'],$hooks['admin_post_church_connector_pair_generatepress']), 'Helper route and authorisation action are no longer registered');
+    check(!function_exists('ChurchWebsiteConnector\\GeneratePressSetup\\create_pairing') && !function_exists('ChurchWebsiteConnector\\GeneratePressSetup\\rest_setup'),'Helper issuing and consuming functions are removed');
+    $options['church_connector_generatepress_pair']=['hash'=>'FAKE-HASH'];$options['native_licence']='DO-NOT-CHANGE';
+    $owner=0;G\remove_legacy_authorisations();check(isset($options['church_connector_generatepress_pair']),'Anonymous cleanup rejected');$owner=1;
+    G\remove_legacy_authorisations();G\remove_legacy_authorisations();
+    check(!isset($options['church_connector_generatepress_pair'],$scheduled['church_connector_expire_generatepress_pair']),'Legacy authorisation and scheduled task are removed');
+    check($options['native_licence']==='DO-NOT-CHANGE' && isset($scheduled['unrelated']) && !$requests,'Cleanup preserves unrelated data and never contacts the vendor');
     foreach(['http://updates.generatepress.com/a','https://updates.generatepress.com.evil.example/a','https://u@updates.generatepress.com/a','https://updates.generatepress.com:443/a','https://updates.generatepress.com/a#b',"https://updates.generatepress.com/a\n"] as $url)check(!G\package_url($url),'Unsafe origin denied');
     check(G\package_url('https://updates.generatepress.com/?token=FAKE'),'Verified origin accepted');
     foreach(['1.0.0','1.0.1','1.0.999'] as $version)check(G\supported_version($version),'Reviewed version line accepted');
@@ -94,6 +77,10 @@ namespace {
     foreach([['license_key',''],['license_key','wrong key!'],['license_key',[]],['_wpnonce','wrong'],['action','other']] as [$field,$value]){$input=$browser;$input[$field]=$value;check(is_wp_error(G\admin_request($input)),'Malformed browser setup denied');}
     $_SERVER['REQUEST_METHOD']='GET';check(is_wp_error(G\admin_request($browser)),'GET browser setup denied');$_SERVER['REQUEST_METHOD']='POST';
     $owner=0;check(is_wp_error(G\admin_request($browser)),'Anonymous browser setup denied');$owner=1;
+    foreach(['manage_options','install_plugins','activate_plugins'] as $cap){$capabilities[1][$cap]=false;check(is_wp_error(G\admin_request($browser)),'Browser requires every installation permission');$capabilities[1][$cap]=true;}
+    $bound=false;check(is_wp_error(G\admin_request($browser)),'Moved or disabled website cannot install');$bound=true;
+    $file_mod_allowed=false;check(is_wp_error(G\admin_request($browser)),'Filesystem policy cannot be bypassed');$file_mod_allowed=true;
+    $extra=$browser;$extra['url']='https://other.example';check(is_wp_error(G\admin_request($extra)),'Browser cannot select another destination');
     check(count($requests)===$before,'Denied browser form does not contact the licence service');
     echo 'GeneratePress setup boundary checks passed ('.$checks.' checks)'.PHP_EOL;
 }

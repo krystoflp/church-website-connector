@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.9.1
+Stable tag: 1.9.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -498,6 +498,12 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.9.2 =
+* Add an explicit Restore to defaults button: enable every connector setting and configuration option except alternative WP Rocket Codex sign-in; enable automatic updates for Website Connector itself and the installed plugins listed in settings, respecting website policy.
+* Remove the private Mac helper option, setup-code screen and helper REST endpoint. GeneratePress AI setup now uses the administrator browser licence form only.
+* Remove saved helper authorisations and their expiry tasks on the next administrator visit after upgrading.
+* Preserve browser autofill/paste, licence error recovery, existing licence and automatic-update choices, and the unattended-upgrade warning.
 
 = 1.9.1 =
 * Put the GeneratePress AI setup warning, licence field and installation button at the top of Connector settings.

@@ -18,7 +18,7 @@ if ( isset( $wpdb ) && is_callable( array( $wpdb, 'get_col' ) ) ) {
 	$names = $wpdb->get_col( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s OR option_name LIKE %s", $wpdb->esc_like( 'church_connector_rest_preview_' ) . '%', $wpdb->esc_like( 'church_connector_rest_lock_' ) . '%', $wpdb->esc_like( 'church_connector_redirect_preview_' ) . '%' ) );
 	foreach ( $names as $name ) {
 		delete_option( $name ); }
-	$update_cache = $wpdb->get_col( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $wpdb->esc_like( '_transient_church_connector_release_' ) . '%', $wpdb->esc_like( '_transient_timeout_church_connector_release_' ) . '%' ) );
+	$update_cache = $wpdb->get_col( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s OR option_name LIKE %s OR option_name LIKE %s", $wpdb->esc_like( '_transient_church_connector_release_' ) . '%', $wpdb->esc_like( '_transient_timeout_church_connector_release_' ) . '%', $wpdb->esc_like( '_transient_church_connector_defaults_result_' ) . '%', $wpdb->esc_like( '_transient_timeout_church_connector_defaults_result_' ) . '%' ) );
 	foreach ( $update_cache as $name ) {
 		delete_option( $name ); }
 }
