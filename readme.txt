@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.9.4
+Stable tag: 1.9.5
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -499,6 +499,10 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.9.5 =
+* Show amber Waiting for Used CSS clearing when Remove Unused CSS is switched off in WP Rocket, with wording that respects the website configuration choice.
+* Keep clearing unavailable until enabled and preserve important permission, website and compatibility warnings.
 
 = 1.9.4 =
 * Status reports the enabled MCP route to the additional WordPress and plugin tools. Both connection options off shows a yellow warning instead of a green separate-connections claim.

@@ -51,6 +51,18 @@ $s=$base;$s['redirection']['plugin_version']=null;$s['redirection']['compatible'
 $adapter['compatible']=false;check(S\rows($base)['adapter']['level']==='red','Missing or incompatible required adapter is red');$adapter['compatible']=true;
 $s=$base;$s['pdf_upload']['current_user_can_upload']=false;check(S\rows($s)['uploads']['level']==='red','Missing upload permission is an important issue');
 foreach(['green'=>'Ready','yellow'=>'Waiting','red'=>'Action needed'] as $level=>$label){$badge=S\badge($level);check(str_contains($badge,$label)&&str_contains($badge,'aria-hidden="true"'),'Every traffic light has visible text and a decorative dot');}
+// WP Rocket's optional CSS optimisation setting can deliberately leave clearing dormant.
+$s=$base;$s['used_css']['ready']=false;$s['used_css']['current_user_can_clear']=false;$s['used_css']['waiting_for_configuration']=true;
+$before=$s;$row=S\rows($s)['used_css'];
+check($row['level']==='yellow'&&!$row['off'],'WP Rocket Remove Unused CSS off waits in amber while the connector helper remains enabled');
+check(str_contains($row['message'],'switched off for this website')&&str_contains($row['message'],'if you choose to enable'),'Waiting message explains the website configuration choice without demanding a change');
+check($s===$before,'Waiting presentation never changes the website configuration');
+ob_start();S\render($s);$waiting_html=ob_get_clean();preg_match('~<tr data-cwc-status="used_css">.*?</tr>~s',$waiting_html,$waiting_row);
+check(str_contains($waiting_row[0],'cwc-status-yellow')&&str_contains($waiting_row[0],'Waiting')&&!str_contains($waiting_row[0],'Action needed'),'Rendered Used CSS row has an amber badge and visible Waiting label');
+$s['used_css']['enabled']=false;check(S\rows($s)['used_css']['level']==='green'&&S\rows($s)['used_css']['off'],'Switching off the connector helper remains a green optional off state');
+foreach(['Unsupported version','Missing WP Rocket interface','Wrong website'] as $problem){$s=$base;$s['used_css']['ready']=false;$s['used_css']['current_user_can_clear']=false;$s['used_css']['message']=$problem;$row=S\rows($s)['used_css'];check($row['level']==='red'&&$row['message']===$problem,'Important Used CSS problem stays red: '.$problem);}
+$s=$base;$s['used_css']['current_user_can_clear']=false;check(S\rows($s)['used_css']['level']==='red','Ready services without clearing permission remain red');
+$s['used_css']['ready']=false;$s['used_css']['legacy_helpers_active']=['earlier-helper'];check(S\rows($s)['used_css']['level']==='yellow','Existing legacy-helper waiting state is preserved');
 // A configured helper is not advertised as ready while its MCP route is disabled.
 $flags=['generatepress_bridge'=>false,'codex'=>false];$s=$base;$s['primary_connection']=M\primary_connection();$r=S\rows($s);
 check($r['primary']['level']==='yellow'&&str_contains($r['primary']['message'],'No MCP route enabled'),'Both-off row warns about MCP tool access');
