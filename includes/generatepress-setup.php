@@ -1,5 +1,5 @@
 <?php
-/** Administrator-authorised, single-use setup of the separate licensed plugin. */
+/** Administrator browser setup of the separate licensed plugin. */
 declare(strict_types=1);
 
 namespace ChurchWebsiteConnector\GeneratePressSetup;
@@ -11,12 +11,8 @@ defined( 'ABSPATH' ) || exit;
 const PLUGIN_FILE  = 'generatepress-ai/generatepress-ai.php';
 const STORE        = 'https://updates.generatepress.com/';
 const ITEM_ID      = 2936664;
-const PAIR         = 'church_connector_generatepress_pair';
 const STATE        = 'church_connector_generatepress_setup';
 const LOCK         = 'church_connector_generatepress_lock';
-const PAIR_ACTION  = 'church_connector_pair_generatepress';
-const ROUTE        = 'church-connector/v1/generatepress-setup';
-const PAIR_TTL     = 600;
 const MAX_BYTES    = 32 * 1024 * 1024;
 const ADMIN_ACTION = 'church_connector_setup_generatepress';
 
@@ -32,97 +28,13 @@ function owner_allowed( int $owner ): bool {
 		&& wp_is_file_mod_allowed( 'plugins' );
 }
 
-/** A setup authorisation is distinct from, and cannot authenticate as, a WP login. */
-function create_pairing() {
-	if ( ! is_user_logged_in() || ! owner_allowed( get_current_user_id() ) ) {
-		return error( 'forbidden', __( 'An administrator with plugin installation rights must authorise this setup.', 'church-website-connector' ), 403 );
+/** Retire saved helper authorisations and expiry jobs after an upgrade. */
+function remove_legacy_authorisations(): void {
+	if ( ! is_user_logged_in() || ! user_can( get_current_user_id(), 'manage_options' ) ) {
+		return;
 	}
-	$code   = bin2hex( random_bytes( 32 ) );
-	$record = array(
-		'hash'    => hash( 'sha256', $code ),
-		'owner'   => get_current_user_id(),
-		'site'    => Connector\current_identity(),
-		'expires' => time() + PAIR_TTL,
-	);
-	update_option( PAIR, $record, false );
-	if ( get_option( PAIR ) !== $record ) {
-		return error( 'storage', __( 'WordPress could not save the setup authorisation.', 'church-website-connector' ) );
-	}
-	wp_schedule_single_event( $record['expires'], 'church_connector_expire_generatepress_pair', array( $record['hash'] ) );
-	return array(
-		'code'     => $code,
-		'endpoint' => rest_url( ROUTE ),
-		'expires'  => $record['expires'],
-	);
-}
-
-/** Delete only the expired authorisation for this exact generation. */
-function expire_pairing( string $hash ): void {
-	$record = get_option( PAIR, false );
-	if ( is_array( $record ) && ( $record['hash'] ?? '' ) === $hash && ( $record['expires'] ?? PHP_INT_MAX ) <= time() ) {
-		Connector\RestTools\conditional_delete( PAIR, $record );
-	}
-}
-
-/** Check scope, owner and identity on every call, including immediately before use. */
-function pairing_record( $request ) {
-	$code   = $request->get_header( 'x-church-setup-code' );
-	$record = get_option( PAIR, false );
-	if ( ! is_string( $code ) || 1 !== preg_match( '/\A[a-f0-9]{64}\z/', $code )
-		|| ! is_array( $record ) || ! is_string( $record['hash'] ?? null )
-		|| ! hash_equals( $record['hash'], hash( 'sha256', $code ) )
-		|| ( $record['expires'] ?? 0 ) <= time() || ( $record['expires'] ?? 0 ) > time() + PAIR_TTL
-		|| ( $record['site'] ?? null ) !== Connector\current_identity()
-		|| ! owner_allowed( (int) ( $record['owner'] ?? 0 ) ) ) {
-		return error( 'authorisation', __( 'This setup code is invalid, expired or no longer authorised. Create a new code in Website Connector settings.', 'church-website-connector' ), 403 );
-	}
-	return $record;
-}
-
-/** No current-user impersonation occurs in the permission callback. */
-function rest_permission( $request ) {
-	$record = pairing_record( $request );
-	return is_wp_error( $record ) ? $record : true;
-}
-
-/** Registered independently of licensed MCP, on exactly one fixed operation. */
-function register_route(): void {
-	register_rest_route(
-		'church-connector/v1',
-		'/generatepress-setup',
-		array(
-			'methods'             => \WP_REST_Server::CREATABLE,
-			'permission_callback' => __NAMESPACE__ . '\\rest_permission',
-			'callback'            => __NAMESPACE__ . '\\rest_setup',
-		)
-	);
-}
-
-/** Consume the authorisation atomically before any installer or vendor request. */
-function rest_setup( $request ) {
-	$record = pairing_record( $request );
-	if ( is_wp_error( $record ) ) {
-		return $record;
-	}
-	$input = $request->get_json_params();
-	if ( ! is_array( $input ) || array_keys( $input ) !== array( 'license_key' ) || ! is_string( $input['license_key'] )
-		|| 1 !== preg_match( '/\A[a-zA-Z0-9_-]{1,256}\z/', $input['license_key'] ) ) {
-		return error( 'input', __( 'Use the private Mac helper with a valid GeneratePress One licence reference.', 'church-website-connector' ) );
-	}
-	if ( ! Connector\RestTools\conditional_delete( PAIR, $record ) ) {
-		return error( 'consumed', __( 'This setup code has already been used. Inspect the setup result before authorising another attempt.', 'church-website-connector' ), 409 );
-	}
-	$previous = get_current_user_id();
-	try {
-		wp_set_current_user( $record['owner'] );
-		$result = run( $input['license_key'] );
-		if ( is_wp_error( $result ) ) {
-			return $result;
-		}
-		return new \WP_REST_Response( $result, 200, array( 'Cache-Control' => 'no-store' ) );
-	} finally {
-		wp_set_current_user( $previous );
-	}
+	delete_option( 'church_connector_generatepress_pair' );
+	wp_unschedule_hook( 'church_connector_expire_generatepress_pair' );
 }
 
 /** Persist a bounded local outcome without licence values, URLs or transcripts. */
@@ -391,7 +303,7 @@ function run( string $key ) {
 		$registered = false;
 		if ( ! isset( $plugins[ PLUGIN_FILE ] ) ) {
 			if ( 'direct' !== get_filesystem_method( array(), WP_PLUGIN_DIR ) ) {
-				return finish( 'failed', __( 'WordPress requires filesystem credentials. Install GeneratePress AI through Installed Plugins before using the helper again.', 'church-website-connector' ) );
+				return finish( 'failed', __( 'WordPress requires filesystem credentials. Install GeneratePress AI through Installed Plugins before retrying the licence form.', 'church-website-connector' ) );
 			}
 			$release = release( $key );
 			if ( is_wp_error( $release ) && 'church_connector_gp_package_missing' === $release->get_error_code() ) {
@@ -464,7 +376,7 @@ function run( string $key ) {
 	}
 }
 
-/** A normal administrator POST can run the same installer without pairing codes. */
+/** Require the administrator session, permissions and action nonce for setup. */
 function admin_request( array $input ) {
 	if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
 		return error( 'method', __( 'Use the installation button in Website Connector settings.', 'church-website-connector' ), 405 );
@@ -539,42 +451,6 @@ function render_callout( array $status ): void {
 	echo '<p>' . esc_html__( 'New installations enable automatic updates when website policy allows. Unattended connector updates do not install it or access 1Password. Nothing is installed until this form is submitted.', 'church-website-connector' ) . '</p></section>';
 }
 
-/** Retain the optional older Mac helper without making it the primary workflow. */
-function render(): void {
-	$state = status();
-	echo '<details><summary>' . esc_html__( 'Optional: use the existing Mac helper instead', 'church-website-connector' ) . '</summary><p>' . esc_html__( 'The licence field and installation button at the top are the recommended setup. No helper app or setup codes are required. The older private Mac helper remains available if already configured.', 'church-website-connector' ) . '</p><p>' . esc_html( $state['message'] ) . '</p>';
-	if ( owner_allowed( get_current_user_id() ) ) {
-		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
-		wp_nonce_field( PAIR_ACTION );
-		echo '<input type="hidden" name="action" value="' . esc_attr( PAIR_ACTION ) . '">';
-		submit_button( __( 'Authorise setup from my Mac', 'church-website-connector' ), 'secondary', 'cwc-gp-helper-submit', false );
-		echo '</form>';
-	}
-	echo '</details>';
-}
-
-/** Display a secret once, with no redirect/query-string transport or persistence. */
-function pairing_page(): void {
-	if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
-		wp_die( esc_html__( 'Use the setup authorisation button in Website Connector settings.', 'church-website-connector' ), '', array( 'response' => 405 ) );
-	}
-	check_admin_referer( PAIR_ACTION );
-	$pairing = create_pairing();
-	if ( is_wp_error( $pairing ) ) {
-		wp_die( esc_html( $pairing->get_error_message() ), '', array( 'response' => 403 ) );
-	}
-	nocache_headers();
-	header( 'Referrer-Policy: no-referrer' );
-	$html  = '<h1>' . esc_html__( 'Authorised GeneratePress AI setup', 'church-website-connector' ) . '</h1>';
-	$html .= '<p>' . esc_html__( 'Open the private GeneratePress AI setup helper on your Mac. Enter this setup address and code there. Do not paste the code or licence into chat. The code expires in ten minutes, works once and permits only GeneratePress AI setup on this website. Creating another code replaces this one.', 'church-website-connector' ) . '</p>';
-	$html .= '<p><label for="cwc-setup-address">' . esc_html__( 'Setup address', 'church-website-connector' ) . '</label><br><input id="cwc-setup-address" type="text" readonly style="width:100%" value="' . esc_attr( $pairing['endpoint'] ) . '"></p>';
-	$html .= '<p><label for="cwc-setup-code">' . esc_html__( 'One-use setup code', 'church-website-connector' ) . '</label><br><input id="cwc-setup-code" type="text" readonly autocomplete="off" spellcheck="false" style="width:100%" value="' . esc_attr( $pairing['code'] ) . '"></p>';
-	$html .= '<p><a href="' . esc_url( admin_url( 'options-general.php?page=church-website-connector' ) ) . '">' . esc_html__( 'Return to Website Connector and inspect the result', 'church-website-connector' ) . '</a></p>';
-	wp_die( $html, esc_html__( 'GeneratePress AI setup', 'church-website-connector' ), array( 'response' => 200 ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every dynamic HTML value is escaped above.
-}
-
-add_action( 'rest_api_init', __NAMESPACE__ . '\\register_route' );
-add_action( 'admin_post_' . PAIR_ACTION, __NAMESPACE__ . '\\pairing_page' );
-add_action( 'church_connector_expire_generatepress_pair', __NAMESPACE__ . '\\expire_pairing' );
+add_action( 'admin_init', __NAMESPACE__ . '\\remove_legacy_authorisations' );
 add_action( 'wp_ajax_' . ADMIN_ACTION, __NAMESPACE__ . '\\admin_ajax' );
 add_action( 'admin_post_' . ADMIN_ACTION, __NAMESPACE__ . '\\admin_post' );

@@ -251,7 +251,9 @@ function admin_page(): void {
 			: 'Enabled, but this account does not have permission to upload files.' );
 	echo '<div class="wrap"><h1>Website Connector</h1>';
 	Updates\render_notice();
+	Defaults\render_notice();
 	GeneratePressSetup\render_callout( $status );
+	Defaults\render();
 	Maintenance\render_summary( $status );
 	echo '<p>Connect your assistant to this website using the setup selected below. Reuse an existing connection for this website where available; a new connection needs native website sign-in and your consent.</p>';
 	echo '<p><strong>Plugin version:</strong> ' . esc_html( VERSION ) . '</p>';
@@ -302,7 +304,6 @@ function admin_page(): void {
 	echo '</tbody></table><p><a href="' . esc_url( admin_url( 'options-general.php?page=generatepress-ai' ) ) . '">Open GeneratePress AI setup</a> · <a href="' . esc_url( admin_url( 'options-general.php?page=wprocket' ) ) . '">Open WP Rocket</a> · <a href="' . esc_url( admin_url( 'plugin-install.php?s=mcp-adapter&tab=search&type=term' ) ) . '">Find MCP Adapter</a> · <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Manage installed plugins</a></p>';
 
 	AdapterSetup\render();
-	GeneratePressSetup\render();
 	echo '<h2>2. Choose website settings</h2><form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 	wp_nonce_field( 'church_connector_save' );
 	echo '<input type="hidden" name="action" value="church_connector_save"><fieldset><legend class="screen-reader-text">Connection helpers for this website</legend>';

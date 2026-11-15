@@ -181,35 +181,47 @@ existing identity and update channel. See [the plugin guide](readme.txt).
 
 [Official filter reference](https://imagify.io/documentation/imagify-optimization-filter-hooks/).
 
-## GeneratePress AI setup in 1.9.0
+## GeneratePress AI setup in 1.9.2
 
-An administrator can authorise a one-use GeneratePress AI setup request from the
-Website Connector settings. The private Mac helper reads the GeneratePress One
-licence from 1Password. Setup downloads the latest supported stable release from
-GeneratePress, verifies and installs it with WordPress, and uses its native licence
-manager. Newly installed copies receive the normal WordPress automatic-update
-preference once; existing installations and later administrator choices remain.
+At the top of **Settings → Website Connector**, fill the GeneratePress One licence
+field through your 1Password browser extension, or paste the key, then choose
+**Install and activate GeneratePress AI**. Additional-field autofill may need a
+one-time mapping. WordPress administrator permissions, the saved website binding
+and an action nonce protect this POST-only operation. No Mac helper, local
+application or setup code is used. Version 1.9.2 removes the former helper endpoint
+and authorisation screen; the next administrator visit deletes old helper codes
+and their expiry tasks.
 
-Unattended connector upgrades never install GeneratePress AI, fetch a licence or
-access 1Password. When setup is needed, an administrator warning points to the
-manual authorisation step. GeneratePress AI's own future automatic updates use
-the licence already saved on the website.
+Setup downloads the latest supported stable GeneratePress AI release from its
+verified HTTPS update service, validates the package, and uses its native licence
+manager. New installations receive the native WordPress automatic-update preference
+once. Existing valid licences and later administrator choices are preserved.
+Invalid/expired keys, missing entitlement, activation limits and outages produce
+safe recovery messages. The inspected contract is GeneratePress AI 1.0.x; an
+unreviewed release pauses setup. Releases and diagnostics contain no licence keys
+or signed download addresses.
 
-One-use codes expire after ten minutes and are bound to the approving account
-and exact website. No general WordPress login or arbitrary installation ability
-is exposed. Existing valid licences are preserved; invalid/expired keys, missing
-entitlement, activation limits and outages produce safe error messages. The
-inspected native contract is GeneratePress AI 1.0.x; unreviewed releases pause
-setup rather than falling back to an older package. No licence value or signed
-package URL is included in connector releases, diagnostics or helper logs.
+Unattended connector upgrades never install GeneratePress AI, retrieve a licence
+or access 1Password. When setup is needed, an administrator warning points to the
+licence form. GeneratePress AI's own updates use the licence saved on the website.
 
-## Simplified browser setup in 1.9.1
+## Restore to defaults in 1.9.2
 
-The primary GeneratePress AI setup is now a prominent warning and licence field at
-the top of Website Connector settings. Fill the field through your 1Password
-browser extension (additional-field support may need a one-time mapping), or paste
-the key, then choose **Install and activate GeneratePress AI**. No helper app or
-setup code is required. WordPress's administrator session, permissions and nonce
-protect the POST request; the key is never repopulated into the form or put in URLs.
-The existing private Mac helper remains an optional alternative. Unattended
-upgrades still perform no installation, licence retrieval or activation.
+Choose **Restore to defaults** beside the status summary to enable every connector
+setting and website configuration option, including Imagify PDF protection and the
+single GeneratePress connection. **Allow official Codex sign-in through the
+alternative WP Rocket connection** is set to disabled. The action enables tools
+for existing authorised GeneratePress clients as described on the settings page.
+
+It also enables native automatic-update preferences for **Website Connector itself**
+and the installed plugins listed on the page: MCP Adapter, GeneratePress AI,
+GenerateBlocks, WP Rocket, Imagify, Redirection, The SEO Framework, Rank Math,
+Code Snippets and WS Form Pro. Unrelated plugin preferences remain unchanged.
+Missing plugins are not installed or selected. Hosting policy and per-plugin
+restrictions still apply, and a warning identifies preferences that could not be
+enabled. No plugin is activated, licensed or updated by restoration.
+
+Restoration requires a deliberate administrator POST with its own action nonce
+and plugin-update permission on the reviewed, bound website. Opening settings,
+reactivation and automatic upgrades never restore defaults. Later manual choices
+remain until another deliberate restore.
