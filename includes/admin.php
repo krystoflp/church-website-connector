@@ -23,9 +23,9 @@ function dependency_issues(): array {
 	$issues = array();
 	if ( ! defined( 'GENERATEPRESS_AI_VERSION' ) || ! class_exists( '\GeneratePress_AI_MCP' ) ) {
 		$issues['generatepress_ai'] = array(
-			'message' => 'GeneratePress AI is missing or inactive. Install and activate it, then activate your GeneratePress One licence.',
-			'url'     => admin_url( 'options-general.php?page=generatepress-ai' ),
-			'action'  => 'GeneratePress AI setup',
+			'message' => 'GeneratePress AI setup needs an administrator. Unattended connector updates do not install it or access 1Password. Open Website Connector to authorise setup, or review the existing GeneratePress AI licence.',
+			'url'     => admin_url( 'options-general.php?page=church-website-connector#cwc-gp-setup' ),
+			'action'  => 'Open GeneratePress AI setup',
 		);
 	}
 	$adapter = AdapterSetup\status();
@@ -93,7 +93,7 @@ function dependency_notice(): void {
 		return; }
 	echo '<div class="notice notice-warning"><p><strong>Website Connector needs setup</strong></p><ul>';
 	foreach ( $issues as $issue ) {
-		echo '<li>' . esc_html( $issue['message'] ) . ' <a href="' . esc_url( $issue['url'] ) . '">' . esc_html( $issue['action'] ) . '</a></li>';
+		echo '<li>' . esc_html( $issue['message'] ) . ' <a' . ( 'Open GeneratePress AI setup' === $issue['action'] ? ' class="button button-primary"' : '' ) . ' href="' . esc_url( $issue['url'] ) . '">' . esc_html( $issue['action'] ) . '</a></li>';
 	}
 	echo '</ul><p><a href="' . esc_url( admin_url( 'options-general.php?page=church-website-connector' ) ) . '">Open Website Connector</a></p></div>';
 }
@@ -251,6 +251,7 @@ function admin_page(): void {
 			: 'Enabled, but this account does not have permission to upload files.' );
 	echo '<div class="wrap"><h1>Website Connector</h1>';
 	Updates\render_notice();
+	GeneratePressSetup\render_callout( $status );
 	Maintenance\render_summary( $status );
 	echo '<p>Connect your assistant to this website using the setup selected below. Reuse an existing connection for this website where available; a new connection needs native website sign-in and your consent.</p>';
 	echo '<p><strong>Plugin version:</strong> ' . esc_html( VERSION ) . '</p>';
@@ -301,6 +302,7 @@ function admin_page(): void {
 	echo '</tbody></table><p><a href="' . esc_url( admin_url( 'options-general.php?page=generatepress-ai' ) ) . '">Open GeneratePress AI setup</a> · <a href="' . esc_url( admin_url( 'options-general.php?page=wprocket' ) ) . '">Open WP Rocket</a> · <a href="' . esc_url( admin_url( 'plugin-install.php?s=mcp-adapter&tab=search&type=term' ) ) . '">Find MCP Adapter</a> · <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Manage installed plugins</a></p>';
 
 	AdapterSetup\render();
+	GeneratePressSetup\render();
 	echo '<h2>2. Choose website settings</h2><form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 	wp_nonce_field( 'church_connector_save' );
 	echo '<input type="hidden" name="action" value="church_connector_save"><fieldset><legend class="screen-reader-text">Connection helpers for this website</legend>';

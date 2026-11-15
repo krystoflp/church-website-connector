@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.8.0
+Stable tag: 1.9.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -498,6 +498,20 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.9.1 =
+* Put the GeneratePress AI setup warning, licence field and installation button at the top of Connector settings.
+* Allow browser-based licence entry and 1Password custom-field filling without a Mac helper or setup codes.
+* Use the administrator's WordPress session and an action nonce; send the licence only in POST and never repopulate it in the connector form.
+* Retain the optional existing Mac helper and all unattended-upgrade, licence-error and update-preference safeguards.
+
+= 1.9.0 =
+* Keep unattended connector upgrades free of paid-plugin installation or licence access; show an administrator setup warning when needed.
+* Add administrator-authorised GeneratePress AI installation and native licence activation through the private 1Password Mac helper.
+* Select WordPress automatic updates once for newly installed GeneratePress AI; preserve existing installations and later administrator choices.
+* Bind single-use setup codes to the approving administrator and exact website, with ten-minute expiry and no general REST access.
+* Verify stable release metadata, package origin, archive paths and plugin headers; retain no connector copy of licence keys or signed package URLs.
+
 
 = 1.8.0 =
 * Add a separate website configuration module and administrator control to prevent Imagify PDF optimisation, preserving each document’s existing language and accessibility information.

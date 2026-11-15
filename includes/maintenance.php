@@ -19,8 +19,9 @@ function update_api(): void {
 /** Apply a native preference once, only when the caller confirmed a new installation. */
 function initial_auto_update( string $file ): void {
 	$markers = array(
-		Updates\plugin_file()              => 'church_connector_auto_default_connector',
-		Connector\AdapterSetup\PLUGIN_FILE => 'church_connector_auto_default_adapter',
+		Updates\plugin_file()                    => 'church_connector_auto_default_connector',
+		Connector\AdapterSetup\PLUGIN_FILE       => 'church_connector_auto_default_adapter',
+		Connector\GeneratePressSetup\PLUGIN_FILE => 'church_connector_auto_default_generatepress',
 	);
 	if ( ! isset( $markers[ $file ] ) || ! add_option( $markers[ $file ], 'attempted', '', false ) ) {
 		return;
@@ -67,7 +68,12 @@ function auto_status( string $file ): array {
 	} elseif ( true === $forced ) {
 		$message = __( 'Enabled by website update policy', 'church-website-connector' );
 	}
-	$marker = get_option( Updates\plugin_file() === $file ? 'church_connector_auto_default_connector' : 'church_connector_auto_default_adapter', '' );
+	$markers = array(
+		Updates\plugin_file()                    => 'church_connector_auto_default_connector',
+		Connector\AdapterSetup\PLUGIN_FILE       => 'church_connector_auto_default_adapter',
+		Connector\GeneratePressSetup\PLUGIN_FILE => 'church_connector_auto_default_generatepress',
+	);
+	$marker  = get_option( $markers[ $file ] ?? 'church_connector_unknown_auto_default', '' );
 	if ( ! $selected && $available && null === $forced && in_array( $marker, array( 'blocked', 'failed', 'attempted' ), true ) ) {
 		$message = __( 'Disabled; the initial preference could not be enabled. Review Installed Plugins.', 'church-website-connector' );
 	}
@@ -145,8 +151,9 @@ function diagnostic_report() {
 		);
 	}
 	foreach ( array(
-		'connector'   => Updates\plugin_file(),
-		'mcp_adapter' => Connector\AdapterSetup\PLUGIN_FILE,
+		'connector'        => Updates\plugin_file(),
+		'mcp_adapter'      => Connector\AdapterSetup\PLUGIN_FILE,
+		'generatepress_ai' => Connector\GeneratePressSetup\PLUGIN_FILE,
 	) as $key => $file ) {
 		$auto = auto_status( $file );
 		unset( $auto['message'] );
@@ -172,6 +179,7 @@ function render_summary( array $status ): void {
 		__( 'Latest known stable release', 'church-website-connector' ) => $updates['latest'] ?? __( 'Not checked yet', 'church-website-connector' ),
 		__( 'Connector automatic updates', 'church-website-connector' ) => auto_status( Updates\plugin_file() )['message'],
 		__( 'MCP Adapter automatic updates', 'church-website-connector' ) => auto_status( Connector\AdapterSetup\PLUGIN_FILE )['message'],
+		__( 'GeneratePress AI automatic updates', 'church-website-connector' ) => auto_status( Connector\GeneratePressSetup\PLUGIN_FILE )['message'],
 		__( 'Last release check', 'church-website-connector' ) => format_time( $updates['last_attempt'] ) . ' — ' . $result,
 		__( 'Last successful release check', 'church-website-connector' ) => format_time( $updates['last_success'] ),
 		__( 'Primary connection', 'church-website-connector' ) => $status['generatepress_oauth_bridge']['enabled'] && $status['generatepress_oauth_bridge']['compatible'] ? __( 'GeneratePress', 'church-website-connector' ) : __( 'Separate GeneratePress and WP Rocket connections', 'church-website-connector' ),

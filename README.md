@@ -180,3 +180,36 @@ PDF support is excluded. The small configuration module retains the connector’
 existing identity and update channel. See [the plugin guide](readme.txt).
 
 [Official filter reference](https://imagify.io/documentation/imagify-optimization-filter-hooks/).
+
+## GeneratePress AI setup in 1.9.0
+
+An administrator can authorise a one-use GeneratePress AI setup request from the
+Website Connector settings. The private Mac helper reads the GeneratePress One
+licence from 1Password. Setup downloads the latest supported stable release from
+GeneratePress, verifies and installs it with WordPress, and uses its native licence
+manager. Newly installed copies receive the normal WordPress automatic-update
+preference once; existing installations and later administrator choices remain.
+
+Unattended connector upgrades never install GeneratePress AI, fetch a licence or
+access 1Password. When setup is needed, an administrator warning points to the
+manual authorisation step. GeneratePress AI's own future automatic updates use
+the licence already saved on the website.
+
+One-use codes expire after ten minutes and are bound to the approving account
+and exact website. No general WordPress login or arbitrary installation ability
+is exposed. Existing valid licences are preserved; invalid/expired keys, missing
+entitlement, activation limits and outages produce safe error messages. The
+inspected native contract is GeneratePress AI 1.0.x; unreviewed releases pause
+setup rather than falling back to an older package. No licence value or signed
+package URL is included in connector releases, diagnostics or helper logs.
+
+## Simplified browser setup in 1.9.1
+
+The primary GeneratePress AI setup is now a prominent warning and licence field at
+the top of Website Connector settings. Fill the field through your 1Password
+browser extension (additional-field support may need a one-time mapping), or paste
+the key, then choose **Install and activate GeneratePress AI**. No helper app or
+setup code is required. WordPress's administrator session, permissions and nonce
+protect the POST request; the key is never repopulated into the form or put in URLs.
+The existing private Mac helper remains an optional alternative. Unattended
+upgrades still perform no installation, licence retrieval or activation.
