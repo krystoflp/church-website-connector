@@ -64,3 +64,50 @@
         if (window.wp && wp.a11y) { wp.a11y.speak(status.textContent); }
     });
 }());
+
+(function () {
+    'use strict';
+    const form = document.getElementById('cwc-gp-install-form');
+    const key = document.getElementById('cwc-generatepress-license-key');
+    const progress = document.getElementById('cwc-gp-setup-progress');
+    if (!form || !key || !progress) { return; }
+    const button = form.querySelector('[type="submit"]');
+    let running = false;
+    function show(message) {
+        progress.textContent = message;
+        if (window.wp && wp.a11y) { wp.a11y.speak(message); }
+    }
+    form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        if (running) { return; }
+        if (!/^[A-Za-z0-9_-]{1,256}$/.test(key.value.trim())) {
+            show(form.dataset.invalid);
+            key.focus();
+            return;
+        }
+        const body = new URLSearchParams(new FormData(form));
+        body.set('license_key', key.value.trim());
+        key.value = '';
+        key.disabled = true;
+        button.disabled = true;
+        running = true;
+        form.setAttribute('aria-busy', 'true');
+        show(form.dataset.running);
+        try {
+            const response = await fetch(form.dataset.url, {
+                method: 'POST', credentials: 'same-origin', body: body
+            });
+            const result = await response.json();
+            if (!result.data || typeof result.data.message !== 'string') { throw new Error('Invalid response'); }
+            show(result.data.message);
+            if (result.success && result.data.status === 'complete') { window.location.reload(); }
+        } catch (error) {
+            show(form.dataset.failure);
+        } finally {
+            key.disabled = false;
+            button.disabled = false;
+            running = false;
+            form.removeAttribute('aria-busy');
+        }
+    });
+}());
