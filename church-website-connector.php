@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Church Website Connector
  * Description: Prepares GeneratePress AI and WP Rocket connections, allows the official Codex client, adds protected tools through MCP, and provides website configuration including Imagify PDF protection.
- * Version: 1.9.2
+ * Version: 1.9.4
  * Requires at least: 7.0
  * Requires PHP: 8.3
  * Author: Church Website Toolkit
@@ -17,7 +17,7 @@ namespace ChurchWebsiteConnector;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION  = '1.9.2';
+const VERSION  = '1.9.4';
 const SETTINGS = 'church_website_connector_settings';
 
 function settings(): array {
@@ -130,7 +130,7 @@ function configure( array $flags ) {
 	$saved['redirection_tools']      = ( $flags['redirection_tools'] ?? false ) === true;
 	foreach ( array( 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools' ) as $key ) {
 		$saved[ $key ] = ( $flags[ $key ] ?? false ) === true; }
-	// Existing choices remain explicit; new setups preselect the bridge in the form.
+	// Save the actual choice; rendering never invents a different checkbox value.
 	$saved['generatepress_bridge'] = ( $flags['generatepress_bridge'] ?? false ) === true;
 	$saved['setup_pending']        = ( $flags['setup_pending'] ?? $previous['setup_pending'] ?? false ) === true;
 	update_option( SETTINGS, $saved, false );
@@ -160,7 +160,7 @@ function activate( $network_wide = false ): void {
 		'rankmath_tools'         => true,
 		'snippets_tools'         => true,
 		'wsform_tools'           => true,
-		'generatepress_bridge'   => false,
+		'generatepress_bridge'   => ( $saved['generatepress_bridge'] ?? ! $saved ) === true,
 		'setup_pending'          => true,
 	);
 	$flags['enabled'] = true;
@@ -191,6 +191,7 @@ require_once __DIR__ . '/includes/admin.php';
 require_once __DIR__ . '/includes/updates.php';
 require_once __DIR__ . '/includes/maintenance.php';
 require_once __DIR__ . '/includes/defaults.php';
+require_once __DIR__ . '/includes/status.php';
 
 register_activation_hook( __FILE__, __NAMESPACE__ . '\\activate' );
 add_action( 'admin_menu', __NAMESPACE__ . '\\admin_menu' );
