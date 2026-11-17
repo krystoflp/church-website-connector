@@ -60,9 +60,19 @@ function presentation(): array {
 		);
 	}
 	if ( $same && 'complete' === ( $state['status'] ?? '' ) ) {
+		// A saved setup outcome is history, not proof of current readiness.
+		$installed = defined( 'WP_PLUGIN_DIR' ) && is_file( WP_PLUGIN_DIR . '/' . PLUGIN_FILE );
+		$message   = __( 'MCP Adapter is not installed. Install and activate it to complete setup.', 'church-website-connector' );
+		if ( $installed ) {
+			// This connector supports single-site WordPress; do not load adapter code here.
+			$active  = in_array( PLUGIN_FILE, (array) get_option( 'active_plugins', array() ), true );
+			$message = $active
+				? __( 'MCP Adapter is marked active, but its interfaces are unavailable. Check the plugin for loading errors or compatibility issues.', 'church-website-connector' )
+				: __( 'MCP Adapter is installed but inactive. Activate it to complete setup.', 'church-website-connector' );
+		}
 		return array(
-			'level'   => 'info',
-			'message' => __( 'MCP Adapter setup completed. Reload this page to check its active interfaces.', 'church-website-connector' ),
+			'level'   => 'warning',
+			'message' => $message,
 		);
 	}
 	if ( $same && 'running' === ( $state['status'] ?? '' ) ) {
