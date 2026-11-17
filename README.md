@@ -284,3 +284,13 @@ standard dismiss button. Dismissal is remembered for that administrator on the
 current website. Other administrators, other dependency warnings, saved feature
 choices and readiness checks are unaffected. WP Rocket is not needed to install
 or activate MCP Adapter or to use the primary GeneratePress connection.
+
+## Current MCP Adapter readiness in 1.9.7
+
+A previous completed setup no longer produces a completed message when the adapter
+is unavailable now. The notice and settings page distinguish an installed but
+inactive adapter, a removed adapter, and a plugin marked active whose interfaces
+are unavailable. A currently loaded compatible adapter still shows ready.
+These read-only status changes do not install, reactivate or queue plugins.
+Upgrades and deliberate deactivation keep their existing behavior; use the setup
+button for an explicit retry when needed.

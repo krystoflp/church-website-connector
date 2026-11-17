@@ -46,10 +46,24 @@ namespace {
     foreach(['https://evil.example/plugin/mcp-adapter.0.7.1.zip','http://downloads.wordpress.org/plugin/mcp-adapter.0.7.1.zip','https://downloads.wordpress.org/plugin/other.0.7.1.zip','https://downloads.wordpress.org/plugin/mcp-adapter.0.7.1.zip?redirect=1'] as $url){$bad=clone $info;$bad->download_link=$url;check(is_wp_error(A\package_url($bad)),'Unexpected package URL denied');}
     foreach(['0.1.0','0.7.1-beta','../other','8.3;bad'] as $version){$bad=clone $info;$bad->version=$version;check(is_wp_error(A\package_url($bad)),'Unsupported version metadata denied');}
     $bad=clone $info;$bad->slug='other';check(is_wp_error(A\package_url($bad)),'Other plugin slug denied');
+    // Stored completion must not overrule the adapter's current availability.
+    define('WP_PLUGIN_DIR',sys_get_temp_dir().'/connector-adapter-state-'.uniqid());
+    mkdir(WP_PLUGIN_DIR);mkdir(WP_PLUGIN_DIR.'/mcp-adapter');
+    A\finish('complete','Previously completed');$before=$GLOBALS['options'];$p=A\presentation();
+    check($p['level']==='warning'&&str_contains($p['message'],'not installed')&&!str_contains($p['message'],'setup completed'),'Removed adapter is not reported as completed');
+    check($GLOBALS['options']===$before&&!A\automatic_allowed(),'Reading stale completion never changes state or queues activation');
+    file_put_contents(WP_PLUGIN_DIR.'/'.A\PLUGIN_FILE,'<?php // Inactive fixture.');
+    foreach([false,true] as $active){
+        update_option('active_plugins',$active?[A\PLUGIN_FILE]:[]);$before=$GLOBALS['options'];$p=A\presentation();
+        check($p['level']==='warning'&&str_contains($p['message'],$active?'interfaces are unavailable':'installed but inactive'),'Current activation state overrides saved completion');
+        check(!str_contains($p['message'],'setup completed')&&$GLOBALS['options']===$before&&!A\automatic_allowed(),'Stale completion reporting is read-only and never reactivates an adapter');
+    }
+    unlink(WP_PLUGIN_DIR.'/'.A\PLUGIN_FILE);rmdir(WP_PLUGIN_DIR.'/mcp-adapter');rmdir(WP_PLUGIN_DIR);unset($GLOBALS['options']['active_plugins']);update_option(A\STATE,$saved);
     eval('namespace WP\\MCP\\Core { class McpAdapter { const VERSION="0.7.1"; } }');
     $result=A\run(true);check(!is_wp_error($result)&&$result['status']==='complete','Existing native adapter reused without installer files or network');
     check(!A\automatic_allowed()&&is_wp_error(A\run(true)),'Completed setup cannot auto-reactivate later');
     check(get_option(A\LOCK)===false,'Setup lock released');
+    check(A\presentation()['level']==='success','Only a currently loaded compatible adapter is presented as ready');
     A\schedule();add_option(A\LOCK,['expires'=>time()+60,'token'=>'other']);$before=$GLOBALS['options'];check(is_wp_error(A\run(true))&&$GLOBALS['options']===$before,'Concurrent setup refused without changing the pending request');
     unset($GLOBALS['options'][A\LOCK]);$r=A\finish('failed',str_repeat('<b>private</b>',500));check(strlen($r['message'])<=1600&&!str_contains($r['message'],'<b>'),'Outcome is bounded plain text');check(!A\automatic_allowed(),'Failure is not retried automatically');
     echo 'Adapter setup boundary checks passed ('.$checks.' checks)'.PHP_EOL;

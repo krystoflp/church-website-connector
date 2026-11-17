@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.9.6
+Stable tag: 1.9.7
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -509,6 +509,11 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.9.7 =
+* Report current MCP Adapter readiness instead of a stale saved setup-completed result. Distinguish an installed but inactive adapter, a removed adapter, and an adapter marked active whose interfaces are unavailable.
+* Keep upgrade and activation behavior unchanged. Status messages do not install, reactivate or queue an adapter; an explicit setup retry remains available.
+
 
 = 1.9.6 =
 * Keep pending MCP Adapter setup eligible after saving settings or restoring defaults.
