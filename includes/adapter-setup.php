@@ -254,27 +254,26 @@ function activation_screen(): bool {
 		&& automatic_allowed() && ! is_wp_error( permission() );
 }
 
-/** Show setup on single and bulk activation confirmations, never ordinary visits. */
-function activation_notice(): void {
-	if ( activation_screen() ) {
-		render();
-	}
+/** Automatic requests remain limited to the existing administrator setup screens. */
+function automatic_screen(): bool {
+	global $pagenow;
+	return ( 'options-general.php' === $pagenow && 'church-website-connector' === ( $_GET['page'] ?? '' ) ) || activation_screen();
 }
 
 /** Enqueue setup and dismissible-notice clients only where needed. */
 function enqueue( string $hook ): void {
-	if ( 'settings_page_church-website-connector' === $hook || ( 'plugins.php' === $hook && activation_screen() ) || ( current_user_can( 'manage_options' ) && ! defined( 'WP_ROCKET_VERSION' ) && ! Connector\rocket_notice_dismissed() ) ) {
+	if ( 'settings_page_church-website-connector' === $hook || ( current_user_can( 'manage_options' ) && ( ! status()['compatible'] || ( ! defined( 'WP_ROCKET_VERSION' ) && ! Connector\rocket_notice_dismissed() ) ) ) ) {
 		wp_enqueue_script( 'church-connector-setup', plugins_url( 'assets/setup.js', dirname( __DIR__ ) . '/church-website-connector.php' ), array( 'wp-a11y' ), Connector\VERSION, true );
 	}
 }
 
 /** Show progress, explicit retry and the native manual installation route. */
-function render(): void {
+function render( bool $allow_automatic = true ): void {
 	if ( status()['compatible'] ) {
 		return;
 	}
 	$permitted    = ! is_wp_error( permission() );
-	$automatic    = $permitted && automatic_allowed();
+	$automatic    = $allow_automatic && $permitted && automatic_allowed();
 	$presentation = presentation();
 	$installed    = defined( 'WP_PLUGIN_DIR' ) && is_file( WP_PLUGIN_DIR . '/' . PLUGIN_FILE );
 	$running      = $installed ? __( 'Activating MCP Adapter automatically. Please wait.', 'church-website-connector' ) : __( 'Installing MCP Adapter automatically. Please wait.', 'church-website-connector' );
@@ -293,5 +292,3 @@ function render(): void {
 
 add_action( 'wp_ajax_' . ACTION, __NAMESPACE__ . '\ajax' );
 add_action( 'admin_enqueue_scripts', __NAMESPACE__ . '\enqueue' );
-
-add_action( 'admin_notices', __NAMESPACE__ . '\\activation_notice' );
