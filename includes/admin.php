@@ -111,7 +111,9 @@ function dependency_notice(): void {
 	$issues = dependency_issues();
 	if ( isset( $issues['mcp_adapter'] ) ) {
 		$adapter = $issues['mcp_adapter'];
-		echo '<div data-cwc-adapter-notice class="notice notice-' . esc_attr( $adapter['level'] ) . '"><p data-cwc-adapter-message>' . esc_html( $adapter['message'] ) . '</p><p><a href="' . esc_url( $adapter['url'] ) . '">' . esc_html( $adapter['action'] ) . '</a></p></div>';
+		echo '<div data-cwc-adapter-notice class="notice notice-' . esc_attr( $adapter['level'] ) . '">';
+		AdapterSetup\render( AdapterSetup\automatic_screen() );
+		echo '</div>';
 		unset( $issues['mcp_adapter'] );
 	}
 	if ( isset( $issues['wp_rocket'] ) ) {
@@ -316,7 +318,6 @@ function admin_page(): void {
 	Status\render( $status );
 	echo '<p><a href="' . esc_url( admin_url( 'options-general.php?page=generatepress-ai' ) ) . '">Open GeneratePress AI setup</a> · <a href="' . esc_url( admin_url( 'options-general.php?page=wprocket' ) ) . '">Open WP Rocket</a> · <a href="' . esc_url( admin_url( 'plugin-install.php?s=mcp-adapter&tab=search&type=term' ) ) . '">Find MCP Adapter</a> · <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Manage installed plugins</a></p>';
 
-	AdapterSetup\render();
 	echo '</section><section aria-labelledby="cwc-settings-title"><h2 id="cwc-settings-title">Settings</h2>';
 	Defaults\render();
 	echo '<form id="cwc-settings-form" method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';

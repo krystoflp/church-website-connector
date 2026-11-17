@@ -294,3 +294,13 @@ are unavailable. A currently loaded compatible adapter still shows ready.
 These read-only status changes do not install, reactivate or queue plugins.
 Upgrades and deliberate deactivation keep their existing behavior; use the setup
 button for an explicit retry when needed.
+
+## Top MCP Adapter setup control in 1.9.8
+
+The working Set up MCP Adapter button, progress and retry now appear in the top
+administrator warning, replacing the settings-page link and the lower duplicate
+control. The existing nonce-protected setup request and native permissions remain.
+The client is loaded wherever the warning offers this button. Automatic setup
+still runs only on the existing connector settings and activation-confirmation
+screens; other administrator pages offer explicit setup only. Upgrade behavior
+and deliberate adapter deactivation remain unchanged.
