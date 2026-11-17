@@ -31,6 +31,7 @@ jobs:
           php tests/updates.php
           php tests/integrations.php
           php tests/adapter-setup.php
+          php tests/rocket-notice.php
           php tests/generatepress-setup.php
           php tests/defaults.php
           php tests/status.php

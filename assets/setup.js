@@ -111,3 +111,17 @@
         }
     });
 }());
+
+(function () {
+    'use strict';
+    const notice = document.getElementById('cwc-rocket-notice');
+    if (!notice) { return; }
+    notice.addEventListener('click', function (event) {
+        if (!event.target.closest('.notice-dismiss')) { return; }
+        const body = new URLSearchParams({
+            action: 'church_connector_dismiss_rocket_notice', nonce: notice.dataset.nonce
+        });
+        fetch(notice.dataset.url, {method: 'POST', credentials: 'same-origin', body: body})
+            .catch(function () { /* WordPress hides it now; an unsaved choice reappears next visit. */ });
+    });
+}());

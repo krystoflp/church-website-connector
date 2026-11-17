@@ -20,7 +20,7 @@ Rocket product. Vendor plugins and commercial licences are separate.
    Website Connector. WordPress's normal schedule and hosting policy apply.
 
 Requires PHP 8.3+, single-site WordPress 7.0+, compatible GeneratePress AI/MCP and
-WP Rocket dependencies. Read [the plugin guide](readme.txt) for compatibility,
+optional WP Rocket integration. Read [the plugin guide](readme.txt) for compatibility,
 feature permissions, authentication and recovery information.
 
 The updater reads published stable GitHub releases from this repository. A release
@@ -268,3 +268,19 @@ explains that clearing becomes available if the administrator chooses to enable
 the option in WP Rocket. This configuration choice requires no corrective action.
 Missing native interfaces, unsupported versions and clearing-permission issues
 retain their error status. Reading the status changes no settings or caches.
+
+## Adapter setup and dismissible WP Rocket warning in 1.9.6
+
+Pending initial MCP Adapter setup survives Save settings and Restore to defaults.
+It can start on the Installed Plugins confirmation after single or bulk activation,
+as well as on Website Connector settings. Setup still uses an administrator's
+nonce-protected request, site binding, native permissions, expiry and one attempt.
+Ordinary visits and unattended connector updates do not install plugins; deliberate
+adapter deactivation after completed setup remains respected. If JavaScript is
+unavailable, use the native Plugins screen to install and activate MCP Adapter.
+
+The missing-WP-Rocket setup warning remains visible by default and now has a
+standard dismiss button. Dismissal is remembered for that administrator on the
+current website. Other administrators, other dependency warnings, saved feature
+choices and readiness checks are unaffected. WP Rocket is not needed to install
+or activate MCP Adapter or to use the primary GeneratePress connection.

@@ -55,3 +55,6 @@ foreach ( array( 'church_connector_generatepress_pair', 'church_connector_genera
 if ( function_exists( 'wp_unschedule_hook' ) ) {
 	wp_unschedule_hook( 'church_connector_expire_generatepress_pair' );
 }
+
+// Remove only this connector's per-account warning preference.
+delete_metadata( 'user', 0, 'church_connector_dismissed_rocket_notice', '', true );

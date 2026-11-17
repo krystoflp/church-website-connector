@@ -96,12 +96,29 @@ async function generatepressScenario(outcome, invalid = false) {
     assert.equal(progress.textContent.includes('FAKE-LICENCE'),false);checks++;
     assert.equal(spoken.length,2);checks++;assert.equal(prevented,2);checks++;
 }
+async function rocketNoticeScenario() {
+    const requests = [], listeners = {};
+    const notice = {dataset:{url:'https://connector.example/wp-admin/admin-ajax.php',nonce:'fixture-dismiss'},addEventListener:(name,fn)=>listeners[name]=fn};
+    vm.runInNewContext(script,{document:{getElementById:id=>id==='cwc-rocket-notice'?notice:null},URLSearchParams,
+        fetch:async(url,options)=>{requests.push({url,options});throw new Error('offline');}});
+    assert.equal(requests.length,0);checks++;
+    listeners.click({target:{closest:()=>null}});assert.equal(requests.length,0);checks++;
+    listeners.click({target:{closest:selector=>selector==='.notice-dismiss'}});
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(requests.length,1);checks++;
+    assert.equal(requests[0].options.method,'POST');checks++;
+    assert.equal(requests[0].options.credentials,'same-origin');checks++;
+    assert.equal(requests[0].url,notice.dataset.url);checks++;
+    assert.equal(requests[0].options.body.get('nonce'),'fixture-dismiss');checks++;
+    assert.equal(requests[0].options.body.get('action'),'church_connector_dismiss_rocket_notice');checks++;
+}
 (async () => {
     await scenario('1', true);
     await scenario('0', true);
     await scenario('1', false);
     await scenario('1', 'network');
     await scenario('1', true, true);
+    await rocketNoticeScenario();
     await clipboardScenario(false);
     await clipboardScenario(true);
     await generatepressScenario('complete');
