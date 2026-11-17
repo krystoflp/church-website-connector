@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.9.5
+Stable tag: 1.9.6
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -110,15 +110,23 @@ The separate preferred dependency is the official WordPress.org MCP Adapter:
 https://wordpress.org/plugins/mcp-adapter/ (slug mcp-adapter).
 No adapter code or other vendor plugin is bundled in the connector ZIP.
 
-On the Website Connector administrator setup screen, a new setup makes one
+On the Installed Plugins confirmation after single or bulk activation, or on the
+Website Connector administrator setup screen, a new setup makes one
 automatic nonce-protected POST to install/activate that adapter if no compatible
 loaded adapter is available. It reuses a compatible adapter supplied elsewhere,
 or activates an already-installed compatible preferred adapter without downloading
 another copy. Active outdated adapters are reported for update, not replaced.
-The automatic setup window expires after seven days; explicit setup remains
+Saving website settings or restoring defaults does not cancel a pending adapter
+attempt. The automatic setup window expires after seven days; explicit setup remains
 available. Ordinary page visits, REST/MCP requests and automatic connector updates
 do not trigger installation. A deliberately deactivated adapter is not repeatedly
 reactivated after setup completes. The administrator can explicitly retry later.
+
+The missing-WP-Rocket setup warning is dismissible for each administrator on the
+current website. Dismissal hides only that warning; other warnings and readiness
+checks remain. WP Rocket is not required for the primary GeneratePress connection
+or for MCP Adapter installation. If setup JavaScript is unavailable, use Installed
+Plugins to install and activate the official MCP Adapter.
 
 Setup requires native plugin installation and activation permissions, allowed
 file modifications and the exact bound website. It uses WordPress's repository
@@ -185,7 +193,9 @@ updater. Vendor plugin updates remain managed by their own update systems.
   newer. Pro authoring needs the corresponding licensed plugins.
 * A compatible MCP Adapter. GeneratePress AI 1.0.0 requires 0.6.1 or newer. A
   compatible bundled adapter can satisfy this; a duplicate plugin is not needed.
-* An active licensed WP Rocket release. The connector also checks for WP Rocket's
+* WP Rocket is optional for the primary GeneratePress connection. An active
+  licensed release is required for its cache tools and alternative gateway.
+  The connector also checks for WP Rocket's
   native MCP OAuth library. That library supports the separate WP Rocket gateway;
   its presence does not mean the primary GeneratePress connection uses WP Rocket
   sign-in. No additional third-party OAuth plugin is bundled or required.
@@ -499,6 +509,13 @@ page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
 == Changelog ==
+
+= 1.9.6 =
+* Keep pending MCP Adapter setup eligible after saving settings or restoring defaults.
+* Start initial adapter setup on the Installed Plugins activation confirmation, including bulk activation. Ordinary visits and unattended updates never install plugins.
+* Make the missing WP Rocket warning dismissible for each administrator on this website. Dismissal leaves readiness and other dependency warnings unchanged.
+* Add explicit recovery guidance when setup JavaScript is unavailable.
+
 
 = 1.9.5 =
 * Show amber Waiting for Used CSS clearing when Remove Unused CSS is switched off in WP Rocket, with wording that respects the website configuration choice.

@@ -107,7 +107,7 @@ function permission() {
 /** An automatic attempt is allowed only during the original setup window. */
 function automatic_allowed(): bool {
 	$state = get_option( STATE, array() );
-	return ! empty( Connector\settings()['setup_pending'] ) && is_array( $state ) && 'pending' === ( $state['status'] ?? '' ) && ( $state['site'] ?? null ) === Connector\current_identity() && ( $state['expires'] ?? 0 ) >= time();
+	return is_array( $state ) && 'pending' === ( $state['status'] ?? '' ) && ( $state['site'] ?? null ) === Connector\current_identity() && ( $state['expires'] ?? 0 ) >= time();
 }
 
 /** Accept only the exact official package matching repository metadata. */
@@ -237,9 +237,23 @@ function ajax(): void {
 	wp_send_json_success( $result );
 }
 
-/** Enqueue the setup client only on this plugin's administrator page. */
+/** Initial activation confirmation is also an administrator setup screen. */
+function activation_screen(): bool {
+	global $pagenow;
+	return 'plugins.php' === $pagenow && ( isset( $_GET['activate'] ) || isset( $_GET['activate-multi'] ) )
+		&& automatic_allowed() && ! is_wp_error( permission() );
+}
+
+/** Show setup on single and bulk activation confirmations, never ordinary visits. */
+function activation_notice(): void {
+	if ( activation_screen() ) {
+		render();
+	}
+}
+
+/** Enqueue setup and dismissible-notice clients only where needed. */
 function enqueue( string $hook ): void {
-	if ( 'settings_page_church-website-connector' === $hook ) {
+	if ( 'settings_page_church-website-connector' === $hook || ( 'plugins.php' === $hook && activation_screen() ) || ( current_user_can( 'manage_options' ) && ! defined( 'WP_ROCKET_VERSION' ) && ! Connector\rocket_notice_dismissed() ) ) {
 		wp_enqueue_script( 'church-connector-setup', plugins_url( 'assets/setup.js', dirname( __DIR__ ) . '/church-website-connector.php' ), array( 'wp-a11y' ), Connector\VERSION, true );
 	}
 }
@@ -255,6 +269,7 @@ function render(): void {
 	$installed    = defined( 'WP_PLUGIN_DIR' ) && is_file( WP_PLUGIN_DIR . '/' . PLUGIN_FILE );
 	$running      = $installed ? __( 'Activating MCP Adapter automatically. Please wait.', 'church-website-connector' ) : __( 'Installing MCP Adapter automatically. Please wait.', 'church-website-connector' );
 	echo '<div id="cwc-adapter-setup" data-url="' . esc_url( admin_url( 'admin-ajax.php' ) ) . '" data-action="' . esc_attr( ACTION ) . '" data-nonce="' . esc_attr( wp_create_nonce( ACTION ) ) . '" data-automatic="' . esc_attr( $automatic ? '1' : '0' ) . '" data-running-automatic="' . esc_attr( $running ) . '" data-running="' . esc_attr__( 'Installing or activating MCP Adapter. Please wait.', 'church-website-connector' ) . '" data-failure="' . esc_attr__( 'The request did not return a result. Reload this page and inspect the Plugins screen before retrying.', 'church-website-connector' ) . '">';
+	echo '<noscript><p>' . esc_html__( 'Automatic MCP Adapter setup needs JavaScript. Enable it, or install and activate MCP Adapter through Installed Plugins.', 'church-website-connector' ) . '</p></noscript>';
 	echo '<p id="cwc-adapter-progress" role="status" aria-live="polite">';
 	echo esc_html( $presentation['message'] );
 	echo '</p>';
@@ -268,3 +283,5 @@ function render(): void {
 
 add_action( 'wp_ajax_' . ACTION, __NAMESPACE__ . '\ajax' );
 add_action( 'admin_enqueue_scripts', __NAMESPACE__ . '\enqueue' );
+
+add_action( 'admin_notices', __NAMESPACE__ . '\\activation_notice' );

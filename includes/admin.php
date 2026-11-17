@@ -78,6 +78,31 @@ function dependency_issues(): array {
 	return $issues;
 }
 
+/** Remember only this administrator's missing-Rocket warning choice on this website. */
+const ROCKET_NOTICE = 'church_connector_dismissed_rocket_notice';
+
+function rocket_notice_dismissed(): bool {
+	return get_user_meta( get_current_user_id(), ROCKET_NOTICE, true ) === current_identity();
+}
+
+/** Dismissing a notice never changes readiness, feature settings or other users. */
+function dismiss_rocket_notice(): void {
+	if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
+		wp_send_json_error( array( 'message' => 'Use a POST request.' ), 405 );
+	}
+	check_ajax_referer( ROCKET_NOTICE, 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( array( 'message' => 'An administrator must dismiss this warning.' ), 403 );
+	}
+	update_user_meta( get_current_user_id(), ROCKET_NOTICE, current_identity() );
+	if ( ! rocket_notice_dismissed() ) {
+		wp_send_json_error( array( 'message' => 'The dismissal could not be saved. The warning will appear again.' ), 500 );
+	}
+	wp_send_json_success();
+}
+
+add_action( 'wp_ajax_church_connector_dismiss_rocket_notice', __NAMESPACE__ . '\\dismiss_rocket_notice' );
+
 /** Appears immediately after activation and clears when dependencies are available. */
 function dependency_notice(): void {
 	if ( ! current_user_can( 'manage_options' ) ) {
@@ -88,6 +113,13 @@ function dependency_notice(): void {
 		$adapter = $issues['mcp_adapter'];
 		echo '<div data-cwc-adapter-notice class="notice notice-' . esc_attr( $adapter['level'] ) . '"><p data-cwc-adapter-message>' . esc_html( $adapter['message'] ) . '</p><p><a href="' . esc_url( $adapter['url'] ) . '">' . esc_html( $adapter['action'] ) . '</a></p></div>';
 		unset( $issues['mcp_adapter'] );
+	}
+	if ( isset( $issues['wp_rocket'] ) ) {
+		if ( ! rocket_notice_dismissed() ) {
+			$rocket = $issues['wp_rocket'];
+			echo '<div class="notice notice-warning is-dismissible" id="cwc-rocket-notice" data-url="' . esc_url( admin_url( 'admin-ajax.php' ) ) . '" data-nonce="' . esc_attr( wp_create_nonce( ROCKET_NOTICE ) ) . '"><p><strong>Website Connector needs setup</strong></p><p>' . esc_html( $rocket['message'] ) . ' <a href="' . esc_url( $rocket['url'] ) . '">' . esc_html( $rocket['action'] ) . '</a></p><p>' . esc_html__( 'WP Rocket is optional for the primary GeneratePress connection. Dismiss this warning for your account on this website if its absence is intentional.', 'church-website-connector' ) . '</p></div>';
+		}
+		unset( $issues['wp_rocket'] );
 	}
 	if ( ! $issues ) {
 		return; }
