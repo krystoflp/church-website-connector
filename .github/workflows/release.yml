@@ -47,9 +47,29 @@ jobs:
       - name: Build distributable package
         run: python3 scripts/build.py
 
+  wordpress:
+    name: Isolated WordPress release check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      package_hash: ${{ steps.tested.outputs.package_hash }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the installation ZIP and metadata
+        run: python3 scripts/build.py
+      - name: Install WordPress Playground
+        run: npm install --prefix "$RUNNER_TEMP/playground" --no-audit --no-fund @wp-playground/cli@3.1.65
+      - name: Test installation, settings, permissions and native upgrade on latest stable WordPress
+        run: python3 scripts/test_wordpress.py --cli "$RUNNER_TEMP/playground/node_modules/.bin/wp-playground-cli"
+      - name: Record the tested release files
+        id: tested
+        run: echo "package_hash=$(sha256sum dist/*.zip dist/*.json | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
   publish:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish
-    needs: check
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    needs: [check, wordpress]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -61,6 +81,10 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 scripts/build.py
+      - name: Verify rebuilt release files match the native check
+        env:
+          TESTED_PACKAGE_HASH: ${{ needs.wordpress.outputs.package_hash }}
+        run: test "$(sha256sum dist/*.zip dist/*.json | sha256sum | cut -d' ' -f1)" = "$TESTED_PACKAGE_HASH"
       - name: Publish complete release
         env:
           GH_TOKEN: ${{ github.token }}
