@@ -346,3 +346,18 @@ tools enabled. Pass the exact site URL to each tool.
 
 Apply tools require native WordPress permissions, explicit approval and the
 latest owner-bound preview. Connector activity records write attempts.
+
+
+## Reviewed design changes and Redirection administration
+
+The connector adds design tools for GeneratePress Premium Block Elements and
+GenerateBlocks Pro forms, overlays and conditions. Use `list-design-items` and
+`get-design-item` first. Review `preview-design-change` and the usage found by
+GenerateBlocks Pro, then explicitly approve `apply-design-change`. The available
+operations depend on the item type and native plugin permissions.
+
+For Redirection use `search-redirection-rules`, `get-redirection-group-details`,
+`get-redirection-log-count`, `get-redirection-rule-defaults` and
+`export-plain-redirection-rules`. Review group, selected batch, disabled-import
+and rule-default changes with `preview-redirection-admin` before applying with
+`apply-redirection-admin`. Permanent removals need explicit confirmation.

@@ -125,9 +125,10 @@ function capabilities( $input ) {
     $checked = check( $input, [ 'site_url' ] ); if ( is_wp_error( $checked ) ) { return $checked; }
     return [ 'site_url' => \ChurchWebsiteConnector\bound_site(), 'redirection' => readiness(),
         'operations' => [ 'list', 'get', 'list_groups', 'create', 'update', 'enable', 'disable', 'delete' ], 'editable_fields' => FIELDS,
+        'administration' => 'Separate Redirection admin tools offer richer search, group changes, selected batches, plain rule imports and exports, matching defaults, and counts of retained log entries for a specified path.',
         'preview_lifetime_seconds' => TTL, 'workflow' => 'Read the current rule, preview one change using its state_hash, review the diff, then apply its owner-bound token after approval. For create, omit id and state_hash. Delete is permanent and requires explicit confirmation. One outstanding Redirection preview per account.',
         'safety_limits' => [ 'rules' => MAX_RULES, 'groups' => 200, 'chain_hops' => MAX_HOPS, 'matching_checks' => MAX_MATCHES ],
-        'limitations' => 'Checks equivalent sources and bounded local chains among plain WordPress URL rules. Regex/conditional rules, external aliases, other plugins and server redirects are not modelled. No arbitrary REST routes, regex editing, group writes, visitor logs, global/bulk operations, plugin settings or automatic cache clearing. Concurrent native-editor changes are checked optimistically; unrelated editors are not locked. Approval flags acknowledge client approval; they are not independent proof of human consent.' ];
+        'limitations' => 'Checks equivalent sources and bounded local chains among plain WordPress URL rules. Regex/conditional rules, external aliases, other plugins and server redirects are not modelled. Single-rule tools accept plain rules only. The administration tools have separate fixed operations and do not return individual visitor records. Concurrent native-editor changes are checked optimistically; unrelated editors are not locked. Approval flags acknowledge client approval; they are not independent proof of human consent.' ];
 }
 
 function listing( $input ) {
@@ -256,15 +257,20 @@ function preview( $input ) {
         $diff = $op === 'delete' ? [ 'redirect' => [ 'before' => $item, 'after' => null ] ] : [ 'enabled' => [ 'before' => $item['enabled'], 'after' => $op === 'enable' ] ];
     }
     $g = group( $fields['group_id'] ); if ( is_wp_error( $g ) ) { return $g; }
+    $saved = save_preview( [ 'operation' => $op, 'id' => $id, 'state_hash' => $item['state_hash'] ?? null, 'fields' => $fields, 'group_hash' => hash( 'sha256', wp_json_encode( group_configuration( $g ) ) ), 'changed_fields' => array_keys( $diff ) ] );
+    if ( is_wp_error( $saved ) ) { return $saved; }
+    return [ 'site_url' => \ChurchWebsiteConnector\bound_site(), 'operation' => $op, 'id' => $id, 'diff' => $diff, 'group' => $g,
+        'message' => $op === 'delete' ? 'Preview only. Deletion is permanent with no undo. Obtain explicit confirmation before applying.' : 'Preview only; no redirect changed. Review and approve before applying. A new preview replaces your previous Redirection preview.' ] + $saved;
+}
+
+function save_preview( array $change ) {
     $owner = get_current_user_id(); $token = bin2hex( random_bytes( 32 ) );
     $old = get_option( stage_name( $owner ), false );
-    if ( is_array( $old ) && isset( $old['token_hash'] ) ) { wp_clear_scheduled_hook( EXPIRE_HOOK, [ $owner, $old['token_hash'] ] ); }
-    $saved = [ 'owner' => $owner, 'site' => \ChurchWebsiteConnector\current_identity(), 'token_hash' => hash( 'sha256', $token ), 'expires' => time() + TTL,
-        'operation' => $op, 'id' => $id, 'state_hash' => $item['state_hash'] ?? null, 'fields' => $fields, 'group_hash' => hash( 'sha256', wp_json_encode( group_configuration( $g ) ) ), 'changed_fields' => array_keys( $diff ) ];
+    $saved = [ 'owner' => $owner, 'site' => \ChurchWebsiteConnector\current_identity(), 'token_hash' => hash( 'sha256', $token ), 'expires' => time() + TTL ] + $change;
     if ( ! update_option( stage_name( $owner ), $saved, false ) ) { return error( 'storage', 'The preview could not be retained. No rule was changed.', 503 ); }
+    if ( is_array( $old ) && isset( $old['token_hash'] ) ) { wp_clear_scheduled_hook( EXPIRE_HOOK, [ $owner, $old['token_hash'] ] ); }
     wp_schedule_single_event( $saved['expires'], EXPIRE_HOOK, [ $owner, $saved['token_hash'] ] );
-    return [ 'site_url' => \ChurchWebsiteConnector\bound_site(), 'operation' => $op, 'id' => $id, 'diff' => $diff, 'group' => $g, 'preview_token' => $token,
-        'expires_at_utc' => gmdate( 'c', $saved['expires'] ), 'message' => $op === 'delete' ? 'Preview only. Deletion is permanent with no undo. Obtain explicit confirmation before applying.' : 'Preview only; no redirect changed. Review and approve before applying. A new preview replaces your previous Redirection preview.' ];
+    return [ 'preview_token' => $token, 'expires_at_utc' => gmdate( 'c', $saved['expires'] ) ];
 }
 
 function load_preview( mixed $token ) {
@@ -278,20 +284,32 @@ function load_preview( mixed $token ) {
 
 function audit( array $saved, string $result ): void {
     $rows = (array) get_option( AUDIT, [] );
-    array_unshift( $rows, [ 'time_utc' => gmdate( 'c' ), 'user_id' => get_current_user_id(), 'operation' => $saved['operation'], 'id' => $saved['id'], 'fields' => $saved['changed_fields'], 'result' => $result ] );
+    array_unshift( $rows, [ 'time_utc' => gmdate( 'Y-m-d\TH:i:s\Z' ), 'user_id' => get_current_user_id(), 'operation' => $saved['operation'], 'id' => $saved['id'], 'fields' => $saved['changed_fields'], 'result' => $result ] );
     update_option( AUDIT, array_slice( $rows, 0, 50 ), false );
+}
+
+function acquire_lock() {
+    $lock = wp_json_encode( [ 'expires' => time() + 120, 'token' => wp_generate_uuid4() ] );
+    if ( ! add_option( LOCK, $lock, '', false ) ) {
+        $old = get_option( LOCK, '' ); $decoded = json_decode( (string) $old, true );
+        if ( ! is_array( $decoded ) || ( $decoded['expires'] ?? PHP_INT_MAX ) >= time() || ! remove_exact( LOCK, $old ) || ! add_option( LOCK, $lock, '', false ) ) { return error( 'busy', 'Another connector redirect change is running.', 409 ); }
+    }
+    return $lock;
+}
+
+function consume( array $saved ): bool {
+    if ( ! remove_exact( stage_name( get_current_user_id() ), $saved ) ) { return false; }
+    wp_clear_scheduled_hook( EXPIRE_HOOK, [ get_current_user_id(), $saved['token_hash'] ] );
+    return true;
 }
 
 function apply( $input ) {
     $checked = check( $input, [ 'site_url', 'preview_token', 'approved' ] ); if ( is_wp_error( $checked ) ) { return $checked; }
     if ( ( $input['approved'] ?? false ) !== true ) { return error( 'approval', 'Apply only after approval, with approved=true.' ); }
     $saved = load_preview( $input['preview_token'] ?? null ); if ( is_wp_error( $saved ) ) { return $saved; }
+    if ( ! in_array( $saved['operation'] ?? null, [ 'create', 'update', 'enable', 'disable', 'delete' ], true ) ) { return error( 'token', 'Use the apply tool named by the preview.', 409 ); }
     $allowed = write_permission( $saved['operation'] ); if ( is_wp_error( $allowed ) ) { return $allowed; }
-    $lock = wp_json_encode( [ 'expires' => time() + 120, 'token' => wp_generate_uuid4() ] );
-    if ( ! add_option( LOCK, $lock, '', false ) ) {
-        $old = get_option( LOCK, '' ); $decoded = json_decode( (string) $old, true );
-        if ( ! is_array( $decoded ) || ( $decoded['expires'] ?? PHP_INT_MAX ) >= time() || ! remove_exact( LOCK, $old ) || ! add_option( LOCK, $lock, '', false ) ) { return error( 'busy', 'Another connector redirect change is running.', 409 ); }
-    }
+    $lock = acquire_lock(); if ( is_wp_error( $lock ) ) { return $lock; }
     try {
         $op = $saved['operation']; $id = $saved['id']; $row = [];
         if ( $op !== 'create' ) {
@@ -306,8 +324,7 @@ function apply( $input ) {
             if ( $fields !== $saved['fields'] ) { return error( 'stale', 'Native validation changed after preview.', 409 ); }
             $conflicts = redirect_safety( $fields, $id ); if ( is_wp_error( $conflicts ) ) { return $conflicts; }
         }
-        if ( ! remove_exact( stage_name( get_current_user_id() ), $saved ) ) { return error( 'token', 'The preview was replaced or consumed.', 409 ); }
-        wp_clear_scheduled_hook( EXPIRE_HOOK, [ get_current_user_id(), $saved['token_hash'] ] );
+        if ( ! consume( $saved ) ) { return error( 'token', 'The preview was replaced or consumed.', 409 ); }
         if ( $op === 'create' || $op === 'update' ) {
             $body = payload( $saved['fields'], $row );
             if ( $op === 'create' ) { $body['status'] = 'enabled'; }

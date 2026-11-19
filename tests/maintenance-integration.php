@@ -23,6 +23,36 @@ if($original_marker===false){delete_option($marker);}else{update_option($marker,
 $stored_update=get_option(U\CHECK_STATUS,false);update_option(U\CHECK_STATUS,['last_attempt'=>time(),'last_success'=>time()-60,'latest'=>'1.7.3','result'=>'failed','secret'=>'DO-NOT-COPY-SECRET'],false);
 $keys=['church_connector_rest_audit','church_connector_redirect_audit','church_connector_integration_audit','church_connector_used_css_log'];$old=[];foreach($keys as $key){$old[$key]=get_option($key,false);}
 foreach($keys as $key){$rows=[];for($i=0;$i<55;$i++){$rows[]=['time_utc'=>gmdate('c',time()-$i),'user_id'=>1,'operation'=>'update','id'=>$i+1,'result'=>'updated','status'=>'cleared','url'=>'https://private.example/DO-NOT-COPY-SECRET','code'=>'DO-NOT-COPY-SECRET','changes'=>['api_token'=>'DO-NOT-COPY-SECRET']];$rows[$i]['time_utc']=gmdate('Y-m-d\TH:i:s\Z',time()-$i);}update_option($key,$rows,false);}
+// Exercise the registered MCP status ability with the same policy sources as Installed Plugins.
+$ability = wp_get_ability('church-connector/connection-status');
+$recorded = get_option(U\CHECK_STATUS);
+$no_http = static function () { throw new RuntimeException('A status read attempted an external request'); };
+add_filter('pre_http_request', $no_http, 100);
+add_filter('plugins_auto_update_enabled', $allow);
+$status = $ability->execute([]);
+maintenance_check(!is_wp_error($status) && $status['current_site_url'] === C\bound_site() && $status['bound_site_url'] === C\bound_site(), 'Native status returns the bound website');
+maintenance_check($status['connector_auto_updates'] === ['selected' => in_array($file, $auto, true), 'available' => true, 'policy' => 'default'], 'Native status reports the actual saved preference and policy');
+maintenance_check($status['github_update_check'] === M\update_status() && $status['github_update_check']['last_success'] === $recorded['last_success'] && $status['github_update_check']['last_attempt'] === $recorded['last_attempt'], 'Failed check preserves the previous successful check time');
+maintenance_check(!str_contains(wp_json_encode($status), 'DO-NOT-COPY-SECRET') && in_array('adapter', $status['serious_issues'], true), 'Native diagnostics omit private stored fields and include serious readiness codes');
+add_filter('auto_update_plugin', '__return_true');
+maintenance_check($ability->execute([])['connector_auto_updates']['policy'] === 'enabled', 'Native status reports a forced opt-in');
+remove_filter('auto_update_plugin', '__return_true');
+add_filter('auto_update_plugin', '__return_false');
+maintenance_check($ability->execute([])['connector_auto_updates']['policy'] === 'disabled', 'Native status reports a forced opt-out');
+remove_filter('auto_update_plugin', '__return_false');
+add_filter('plugins_auto_update_enabled', $deny, 20);
+maintenance_check($ability->execute([])['connector_auto_updates']['available'] === false, 'Global plugin update policy is reported');
+remove_filter('plugins_auto_update_enabled', $deny, 20);
+remove_filter('plugins_auto_update_enabled', $allow);
+$other_site = static fn() => 'https://different.example';
+add_filter('option_home', $other_site, 100);
+maintenance_check(is_wp_error($ability->execute([])), 'A moved website cannot expose the saved update record');
+remove_filter('option_home', $other_site, 100);
+maintenance_check(get_option(U\CHECK_STATUS) === $recorded && get_site_option('auto_update_plugins') === $auto, 'The native status read preserves preferences and GitHub check times');
+wp_set_current_user(0);
+maintenance_check(is_wp_error($ability->execute([])) && is_wp_error(C\mcp_connection_status()), 'Native and direct status deny anonymous access');
+wp_set_current_user(1);
+remove_filter('pre_http_request', $no_http, 100);
 $report=M\diagnostic_report();$json=wp_json_encode($report);
 maintenance_check(!is_wp_error($report)&&$report['connector']===C\VERSION&&$report['updates']['result']==='failed','Report includes selected current technical status');
 maintenance_check(!str_contains($json,'DO-NOT-COPY-SECRET')&&!str_contains($json,'connector.example')&&!str_contains($json,'user_id')&&!str_contains($json,'display_name'),'Diagnostics exclude unapproved stored fields, URLs, activity and account data');
@@ -49,6 +79,6 @@ maintenance_check(str_contains($html,'id="cwc-diagnostic-report"')&&str_contains
 ob_start();M\activity_page();$activity=ob_get_clean();maintenance_check(str_contains($activity,'scope="col"')&&str_contains($activity,'Recent connector changes')&&!str_contains($activity,'DO-NOT-COPY-SECRET'),'Activity screen renders semantic rows without sensitive audit values');
 maintenance_check(C\settings()===$settings&&wp_roles()->roles===$roles&&get_site_option('auto_update_plugins')===$before_updates,'Administration views do not change settings, roles or update preferences');remove_filter('pre_http_request',$network,100);
 wp_set_current_user(0);maintenance_check(is_wp_error(M\diagnostic_report())&&is_wp_error(M\recent_changes())&&M\site_health(['keep'=>true])===['keep'=>true],'Anonymous access is denied, including Site Health');
-$editor=wp_insert_user(['user_login'=>'maintenance-editor','user_pass'=>'local-fixture-only','role'=>'editor']);wp_set_current_user($editor);maintenance_check(is_wp_error(M\diagnostic_report())&&is_wp_error(M\recent_changes()),'Non-administrator cannot read diagnostics or activity');wp_set_current_user(1);
+$editor=wp_insert_user(['user_login'=>'maintenance-editor','user_pass'=>'local-fixture-only','role'=>'editor']);wp_set_current_user($editor);maintenance_check(is_wp_error($ability->execute([])) && is_wp_error(C\mcp_connection_status()), 'Native and direct status deny editors');maintenance_check(is_wp_error(M\diagnostic_report())&&is_wp_error(M\recent_changes()),'Non-administrator cannot read diagnostics or activity');wp_set_current_user(1);
 foreach($old as $key=>$value){if($value===false){delete_option($key);}else{update_option($key,$value,false);}}if($stored_update===false){delete_option(U\CHECK_STATUS);}else{update_option(U\CHECK_STATUS,$stored_update,false);}
 file_put_contents('/reports/maintenance.json',wp_json_encode(['checks'=>$checks,'php'=>PHP_VERSION,'wordpress'=>$GLOBALS['wp_version'],'first_install_preferences'=>true,'later_choices_preserved'=>true,'diagnostics_allowlist'=>true,'admin_permissions'=>true,'read_only_views'=>true,'bounded_existing_history'=>true]));echo 'MAINTENANCE CHECKS PASSED '.$checks;

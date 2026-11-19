@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.11.0
+Stable tag: 1.13.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -536,7 +536,25 @@ Compare and restore a saved revision's title, content and excerpt. Preview
 adding, relabelling, retargeting or moving a link in an existing classic menu.
 Inspect locations, exclusions and audiences for GeneratePress Premium Elements.
 
+== Reviewed design and Redirection administration ==
+
+Use the native GeneratePress connection to preview design changes for Block
+Elements and GenerateBlocks Pro forms, overlays and conditions. Review the
+current item and its known usage before approving. Redirection administration
+adds filtered rule search, exact-path log counts, group management, selected
+batches, reviewed matching defaults and portable plain-rule import/export.
+
 == Changelog ==
+
+= 1.13.0 =
+* Administrators can read the connector automatic-update preference and policy, last GitHub check attempt and success, and serious readiness issues through the existing connection status tool. It reads saved website data without starting an update check.
+
+= 1.12.0 =
+* Add reviewed management of GeneratePress Premium Block Element status and display rules.
+* Add reviewed GenerateBlocks Pro form and overlay publication, form duplication, usage inspection, supported overlay options and condition management.
+* Add Redirection group administration, richer rule search, exact-path log counts, selected batches, matching defaults and disabled plain-rule imports.
+* Verify changes with native permissions, one-use previews and read-back.
+
 
 = 1.11.0 =
 * Search editable Media Library attachments and posts by filename, title, category, date, MIME type or status as applicable.
