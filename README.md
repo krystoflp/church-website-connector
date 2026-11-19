@@ -75,15 +75,16 @@ licence keys, vendor fixtures or client data here.
 Run `php tests/updates.php`, `php tests/integrations.php`,
 `php tests/adapter-setup.php` and `node tests/setup-client.js`, lint the PHP
 files on PHP 8.3, and run `python3 scripts/build.py` to produce a deterministic ZIP, release
-metadata and checksum in `dist/`. The complete connector regression and isolated
-WordPress upgrade checks are run in the maintained development toolkit before a
-release is published.
+metadata and checksum in `dist/`. GitHub runs the portable checks and a required isolated WordPress check on
+pull requests, on main and on release dispatches. The isolated check installs
+the ZIP on the latest stable WordPress with PHP 8.3 and tests administrator
+settings, permissions, native upgrade and rejection of a damaged package.
+Licensed integration tests run separately in the maintained development toolkit.
 
-The **Check and release** workflow runs portable checks on code changes. To publish
-a tested version, open **Actions → Check and release → Run workflow** and select
-**Publish the tested version as a stable release**. It reruns checks, builds the
-package, creates a draft, attaches both required files, and publishes only after
-both uploads complete. Each published revision must have a new version number.
+To publish, dispatch **Check and release** on main and select **Publish the tested
+version as a stable release**. Both test jobs must pass. The publisher verifies
+the rebuilt ZIP and JSON against the tested files before it creates the draft
+and attaches both assets. Each published revision requires a new version number.
 Existing published versions are never overwritten by this workflow.
 
 Published source and packages are public. Only authorised repository maintainers
