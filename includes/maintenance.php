@@ -298,7 +298,54 @@ function recent_changes() {
 		'church_connector_integration_audit' => 'Plugin integration',
 		'church_connector_used_css_log'      => 'Used CSS',
 	);
-	$operations = array( 'create', 'update', 'replace_pdf', 'set_draft_date', 'publish_page', 'schedule', 'cancel_schedule', 'restore_revision', 'edit_menu', 'activate', 'deactivate', 'trash', 'publish', 'unpublish', 'delete', 'enable', 'disable', 'add_field', 'add_section', 'add_tab', 'update_field', 'update_section', 'update_tab', 'delete_field', 'delete_section', 'delete_tab' );
+	$operations = array(
+		'create',
+		'update',
+		'replace_pdf',
+		'set_draft_date',
+		'publish_page',
+		'schedule',
+		'cancel_schedule',
+		'restore_revision',
+		'edit_menu',
+		'design_rename',
+		'design_publish',
+		'design_unpublish',
+		'design_trash',
+		'design_duplicate_form',
+		'design_update_element_rules',
+		'design_update_overlay',
+		'design_update_form_messages',
+		'design_update_condition',
+		'design_delete_unused_condition',
+		'create_group',
+		'rename_group',
+		'enable_group',
+		'disable_group',
+		'delete_empty_group',
+		'bulk_enable',
+		'bulk_disable',
+		'bulk_delete',
+		'update_redirect_defaults',
+		'import_disabled_rules',
+		'activate',
+		'deactivate',
+		'trash',
+		'publish',
+		'unpublish',
+		'delete',
+		'enable',
+		'disable',
+		'add_field',
+		'add_section',
+		'add_tab',
+		'update_field',
+		'update_section',
+		'update_tab',
+		'delete_field',
+		'delete_section',
+		'delete_tab',
+	);
 	$results    = array( 'error', 'completed', 'updated', 'verified', 'verification_unavailable', 'normalised', 'cleared' );
 	$rows       = array();
 	foreach ( $sources as $option => $label ) {
@@ -324,6 +371,9 @@ function recent_changes() {
 					'publish_page', 'schedule', 'cancel_schedule', 'restore_revision' => 'Editorial workflow',
 					default     => 'Post workflow',
 				};
+			}
+			if ( 'Metadata' === $label && str_starts_with( $operation, 'design_' ) ) {
+				$source = 'Design workflow';
 			}
 			$rows[] = array(
 				'timestamp' => $timestamp,

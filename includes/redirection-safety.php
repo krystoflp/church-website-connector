@@ -132,8 +132,8 @@ function safety_rules() {
 }
 
 /** Check all plain overlaps (including disabled rules), then active local chains. */
-function redirect_safety( array $fields, int $id ) {
-    $rules = safety_rules(); if ( is_wp_error( $rules ) ) { return $rules; }
+function redirect_safety( array $fields, int $id, ?array $projected = null ) {
+    $rules = $projected ?? safety_rules(); if ( is_wp_error( $rules ) ) { return $rules; }
     $active = [];
     foreach ( $rules as $rule ) {
         if ( $rule['id'] === $id ) { continue; }

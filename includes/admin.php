@@ -199,6 +199,30 @@ function connection_status( $input = array() ) {
 	);
 }
 
+/** Read saved update evidence only after the native administrator and website checks. */
+function mcp_connection_status( $input = array() ) {
+	$status = connection_status( $input );
+	if ( is_wp_error( $status ) ) {
+		return $status;
+	}
+	if ( ! $status['enabled_on_current_site'] ) {
+		return new \WP_Error( 'church_connector_site_binding', 'Review the website binding before reading update status.', array( 'status' => 403 ) );
+	}
+
+	$auto = Maintenance\auto_status( Updates\plugin_file() );
+
+	$status['connector_auto_updates'] = array(
+		'selected'  => $auto['selected'],
+		'available' => $auto['available'],
+		'policy'    => $auto['policy'],
+	);
+	$status['github_update_check']    = Maintenance\update_status();
+	$status['serious_issues']         = array_keys(
+		array_filter( Status\rows( $status ), static fn( array $row ): bool => 'red' === $row['level'] )
+	);
+	return $status;
+}
+
 function register_status_ability(): void {
 	if ( ! function_exists( 'wp_register_ability' ) || ! is_bound() ) {
 		return;
@@ -207,7 +231,7 @@ function register_status_ability(): void {
 		'church-connector/connection-status',
 		array(
 			'label'               => 'Website Connector status',
-			'description'         => 'Read-only website identity, dependency and connection-helper status. Does not sign in, grant access, change settings or clear caches.',
+			'description'         => 'Read website identity, readiness, connector automatic-update policy and recorded GitHub check times. Requires a bound website and an administrator.',
 			'category'            => 'church-connector',
 			'input_schema'        => array(
 				'type'                 => 'object',
@@ -215,7 +239,7 @@ function register_status_ability(): void {
 				'additionalProperties' => false,
 			),
 			'permission_callback' => __NAMESPACE__ . '\\status_permission',
-			'execute_callback'    => __NAMESPACE__ . '\\connection_status',
+			'execute_callback'    => __NAMESPACE__ . '\\mcp_connection_status',
 			'meta'                => array(
 				'show_in_rest' => false,
 				'mcp'          => array( 'public' => true ),
