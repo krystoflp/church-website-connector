@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.9.8
+Stable tag: 1.11.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -508,7 +508,50 @@ locks, cooldowns, audits and expiry events. It preserves uploaded PDFs, other me
 page/post content, redirects, legacy-helper data, native licences and provider
 credentials. Native authorisations must be revoked through their own providers.
 
+== Weekly posts with PDFs ==
+
+Use the native GeneratePress connection with the connector bridge and REST-backed
+tools enabled. Upload or locate the PDF in the site's Media Library and copy the
+previous post as a draft with its category. Use church-connector/get-post-workflow
+to read the exact post, numbered File blocks and state_hash. Review and apply the
+PDF replacement preview with the attachment ID and a descriptive plain-text label.
+Use the next state_hash to preview and save the site-local date. A date-only value
+means midnight. Saving a date keeps the post a draft.
+
+When ready, preview publication separately, review the title, ID, date and File
+block links, then explicitly confirm publication. An explicit current or past date
+is required for immediate publication. Use the separate scheduling workflow
+for future dates.
+Read back the published status, date, category and permalink. Connector previews
+expire in 15 minutes and are tied to the signed-in account, exact website and
+reviewed saved state. One post, metadata, editorial or menu preview per account can be pending.
+
+== Editorial and navigation tools ==
+
+Search editable media by filename, title, MIME type or upload dates. Find posts
+by category, date, status or text. Use a reviewed preview to schedule, reschedule
+or cancel a post or page, or to publish a draft page immediately. The apply tools
+verify the saved date and native WordPress publication event where applicable.
+Compare and restore a saved revision's title, content and excerpt. Preview
+adding, relabelling, retargeting or moving a link in an existing classic menu.
+Inspect locations, exclusions and audiences for GeneratePress Premium Elements.
+
 == Changelog ==
+
+= 1.11.0 =
+* Search editable Media Library attachments and posts by filename, title, category, date, MIME type or status as applicable.
+* Add reviewed scheduling, rescheduling and cancellation for posts and pages, with native WordPress scheduled event verification.
+* Add deliberate immediate publication of reviewed draft pages.
+* Compare and restore saved post and page revisions while preserving publication state.
+* Preview and apply link changes in existing classic menus, and inspect GeneratePress Premium Element display rules.
+* Include the prepared weekly notice PDF replacement, draft dating and deliberate post publication workflow from 1.10.0.
+
+
+= 1.10.0 =
+* Add reviewed PDF replacement for a selected WordPress File block, retaining its preview configuration and other blocks.
+* Add reviewed site-local publication dates for drafts and a separately confirmed immediate publication operation.
+* Expose the workflow through the GeneratePress bridge with native permissions, state checks, stored result verification and bounded audit records.
+
 
 = 1.9.8 =
 * Put the working MCP Adapter setup button, progress and retry in the top administrator warning instead of a link that only reloads settings. Remove the lower duplicate control.

@@ -304,3 +304,44 @@ The client is loaded wherever the warning offers this button. Automatic setup
 still runs only on the existing connector settings and activation-confirmation
 screens; other administrator pages offer explicit setup only. Upgrade behavior
 and deliberate adapter deactivation remain unchanged.
+
+## Reviewed posts with PDFs
+
+On the native GeneratePress connection, use `church-connector/get-post-workflow`
+to read the post, numbered File blocks and current state hash. Review
+`preview-pdf-replacement` with the same-site Media Library attachment ID and
+plain-text label. This updates the embedded and visible file links and preserves
+the inline preview configuration. Review `preview-draft-date` with a site-local
+date or time. Apply either approved edit using `apply-post-edit`.
+
+To publish a draft with a saved current or past date, use
+`preview-draft-publish` and review the post, date and PDFs. Then use
+`apply-draft-publish` with explicit confirmation. These tools require the
+connector's GeneratePress bridge and REST-backed features. Native permissions,
+expiry, current-state checks and read-back apply.
+
+## Editorial and navigation tools in 1.11.0
+
+Use the native GeneratePress connection with the connector bridge and REST-backed
+tools enabled. Pass the exact site URL to each tool.
+
+- `search-media-library` finds editable attachments by filename, title, MIME type
+  or upload dates. `search-editorial-posts` finds editable posts by category,
+  dates and status, returning IDs for reuse.
+- `get-publication-workflow` reads an exact ordinary post or page. Review
+  `preview-publication-schedule` to schedule or reschedule, or
+  `preview-cancel-schedule` to return a scheduled item to draft. Explicitly
+  confirm with `apply-publication-schedule`; it verifies the native WP-Cron event.
+- Use `preview-page-publication` and `apply-draft-publish` for a reviewed draft
+  page and an explicit current or past site-local date.
+- Find a saved revision with GeneratePress. Use `compare-post-revision`,
+  `preview-revision-restore` and `apply-revision-restore` to review and verify
+  changes to the title, content and excerpt while preserving publication state.
+- Use `get-navigation-menu`, `preview-navigation-menu-edit` and
+  `apply-navigation-menu-edit` to add, relabel, retarget, reorder or nest one
+  link in an existing classic menu. The preview shows the full proposed menu.
+- `list-element-display-rules` reads locations, exclusions and audiences for
+  draft or published classic GeneratePress Premium Elements.
+
+Apply tools require native WordPress permissions, explicit approval and the
+latest owner-bound preview. Connector activity records write attempts.

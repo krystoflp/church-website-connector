@@ -298,7 +298,7 @@ function recent_changes() {
 		'church_connector_integration_audit' => 'Plugin integration',
 		'church_connector_used_css_log'      => 'Used CSS',
 	);
-	$operations = array( 'create', 'update', 'activate', 'deactivate', 'trash', 'publish', 'unpublish', 'delete', 'enable', 'disable', 'add_field', 'add_section', 'add_tab', 'update_field', 'update_section', 'update_tab', 'delete_field', 'delete_section', 'delete_tab' );
+	$operations = array( 'create', 'update', 'replace_pdf', 'set_draft_date', 'publish_page', 'schedule', 'cancel_schedule', 'restore_revision', 'edit_menu', 'activate', 'deactivate', 'trash', 'publish', 'unpublish', 'delete', 'enable', 'disable', 'add_field', 'add_section', 'add_tab', 'update_field', 'update_section', 'update_tab', 'delete_field', 'delete_section', 'delete_tab' );
 	$results    = array( 'error', 'completed', 'updated', 'verified', 'verification_unavailable', 'normalised', 'cleared' );
 	$rows       = array();
 	foreach ( $sources as $option => $label ) {
@@ -318,7 +318,14 @@ function recent_changes() {
 				'ws-form'       => 'WS Form Pro',
 			);
 			$source    = 'Plugin integration' === $label ? ( $labels[ $row['integration'] ?? '' ] ?? $label ) : $label;
-			$rows[]    = array(
+			if ( 'Metadata' === $label && in_array( $operation, array( 'replace_pdf', 'set_draft_date', 'publish', 'publish_page', 'schedule', 'cancel_schedule', 'restore_revision', 'edit_menu' ), true ) ) {
+				$source = match ( $operation ) {
+					'edit_menu' => 'Navigation',
+					'publish_page', 'schedule', 'cancel_schedule', 'restore_revision' => 'Editorial workflow',
+					default     => 'Post workflow',
+				};
+			}
+			$rows[] = array(
 				'timestamp' => $timestamp,
 				'user_id'   => max( 0, (int) ( $row['user_id'] ?? 0 ) ),
 				'source'    => $source,
