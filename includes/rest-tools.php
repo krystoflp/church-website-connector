@@ -117,18 +117,20 @@ function read_item( string $kind, int $id ) {
     return $snapshot;
 }
 
-function capabilities( $input = [] ) {
-    $checked = check_input( $input, [ 'site_url' ] );
-    if ( is_wp_error( $checked ) ) { return $checked; }
-    return [
-        'site_url' => \ChurchWebsiteConnector\bound_site(),
-        'resources' => array_map( __NAMESPACE__ . '\\fields', [ 'post', 'page', 'media' ] ),
-        'resource_order' => [ 'post', 'page', 'media' ],
-        'preview_lifetime_seconds' => TTL,
-        'sign_in' => 'Existing MCP authentication; internal REST requests use the current WordPress user and native REST permission callbacks.',
-        'workflow' => 'Read item details, preview an allowed metadata update with its state_hash, then apply the owner-bound token after approval. One outstanding preview per user.',
-        'content_editing' => 'Use GeneratePress tools for block content and draft authoring. These tools do not change content, status, publication dates, author, arbitrary meta or settings.',
-    ];
+function capabilities( $input = array() ) {
+	$checked = check_input( $input, array( 'site_url' ) );
+	if ( is_wp_error( $checked ) ) {
+		return $checked;
+	}
+	return array(
+		'site_url'                 => \ChurchWebsiteConnector\bound_site(),
+		'resources'                => array_map( __NAMESPACE__ . '\\fields', array( 'post', 'page', 'media' ) ),
+		'resource_order'           => array( 'post', 'page', 'media' ),
+		'preview_lifetime_seconds' => TTL,
+		'sign_in'                  => 'Existing MCP authentication; internal REST requests use the current WordPress user and native REST permission callbacks.',
+		'workflow'                 => 'Read item details, preview an allowed metadata update with its state_hash, then apply the owner-bound token after approval. One outstanding preview per user.',
+		'content_editing'          => 'Use GeneratePress for block authoring. The metadata tools do not change content, status or publication dates. Separate post and editorial tools provide typed PDF replacement, draft dating, publication and scheduling.',
+	);
 }
 
 function get_item( $input ) {
@@ -204,30 +206,91 @@ function expire_preview( int $user_id, string $token_hash ): void {
 }
 
 function preview( $input ) {
-    $checked = check_input( $input, [ 'site_url', 'kind', 'id', 'state_hash', 'changes' ] );
-    if ( is_wp_error( $checked ) ) { return $checked; }
-    $target = target( $input );
-    if ( is_wp_error( $target ) ) { return $target; }
-    $item = read_item( $target['kind'], $target['id'] );
-    if ( is_wp_error( $item ) ) { return $item; }
-    if ( ! is_string( $input['state_hash'] ?? null ) || ! hash_equals( $item['state_hash'], $input['state_hash'] ) ) { return error( 'stale', 'The item changed. Read its details again before previewing.', 409 ); }
-    $changes = normalise_changes( $item, $input['changes'] ?? null );
-    if ( is_wp_error( $changes ) ) { return $changes; }
-    $diff = [];
-    foreach ( $changes as $field => $value ) {
-        if ( $item['fields'][ $field ] !== $value ) { $diff[ $field ] = [ 'before' => $item['fields'][ $field ], 'after' => $value ]; }
-    }
-    if ( ! $diff ) { return error( 'unchanged', 'The proposed metadata is already saved.', 409 ); }
-    $token = bin2hex( random_bytes( 32 ) );
-    $user_id = get_current_user_id();
-    $old = get_option( stage_name( $user_id ), false );
-    if ( is_array( $old ) && isset( $old['token_hash'] ) ) { wp_clear_scheduled_hook( EXPIRE_HOOK, [ $user_id, $old['token_hash'] ] ); }
-    $saved = [ 'token_hash' => hash( 'sha256', $token ), 'owner' => $user_id, 'site' => \ChurchWebsiteConnector\current_identity(), 'expires' => time() + TTL,
-        'kind' => $target['kind'], 'id' => $target['id'], 'state_hash' => $item['state_hash'], 'changes' => array_intersect_key( $changes, $diff ) ];
-    if ( ! update_option( stage_name( $user_id ), $saved, false ) ) { return error( 'storage', 'The preview could not be saved. No item was changed.', 503 ); }
-    wp_schedule_single_event( $saved['expires'], EXPIRE_HOOK, [ $user_id, $saved['token_hash'] ] );
-    return [ 'site_url' => \ChurchWebsiteConnector\bound_site(), 'kind' => $target['kind'], 'id' => $target['id'], 'diff' => $diff,
-        'preview_token' => $token, 'expires_at_utc' => gmdate( 'c', $saved['expires'] ), 'message' => 'Metadata preview only; the item is unchanged. Apply this owner-bound token after approval. A new preview replaces your previous one.' ];
+	$checked = check_input( $input, array( 'site_url', 'kind', 'id', 'state_hash', 'changes' ) );
+	if ( is_wp_error( $checked ) ) {
+		return $checked;
+	}
+	$target = target( $input );
+	if ( is_wp_error( $target ) ) {
+		return $target;
+	}
+	$item = read_item( $target['kind'], $target['id'] );
+	if ( is_wp_error( $item ) ) {
+		return $item;
+	}
+	if ( ! is_string( $input['state_hash'] ?? null ) || ! hash_equals( $item['state_hash'], $input['state_hash'] ) ) {
+		return error( 'stale', 'The item changed. Read its details again before previewing.', 409 );
+	}
+	$changes = normalise_changes( $item, $input['changes'] ?? null );
+	if ( is_wp_error( $changes ) ) {
+		return $changes;
+	}
+	$diff = array();
+	foreach ( $changes as $field => $value ) {
+		if ( $item['fields'][ $field ] !== $value ) {
+			$diff[ $field ] = array(
+				'before' => $item['fields'][ $field ],
+				'after'  => $value,
+			);
+		}
+	}
+	if ( ! $diff ) {
+		return error( 'unchanged', 'The proposed metadata is already saved.', 409 );
+	}
+	$result = save_preview(
+		array(
+			'kind'       => $target['kind'],
+			'id'         => $target['id'],
+			'state_hash' => $item['state_hash'],
+			'changes'    => array_intersect_key( $changes, $diff ),
+		)
+	);
+	if ( is_wp_error( $result ) ) {
+		return $result;
+	}
+	return array(
+		'site_url' => \ChurchWebsiteConnector\bound_site(),
+		'kind'     => $target['kind'],
+		'id'       => $target['id'],
+		'diff'     => $diff,
+		'message'  => 'Metadata preview only; the item is unchanged. Apply this owner-bound token after approval. A new preview replaces your previous one.',
+	) + $result;
+}
+
+/**
+ * Share the owner-bound preview slot across metadata and typed post operations.
+ *
+ * A successful replacement invalidates the previous token before scheduling cleanup.
+ */
+function save_preview( array $operation ): array|\WP_Error {
+	$token   = bin2hex( random_bytes( 32 ) );
+	$user_id = get_current_user_id();
+	$old     = get_option( stage_name( $user_id ), false );
+	$saved   = array(
+		'token_hash' => hash( 'sha256', $token ),
+		'owner'      => $user_id,
+		'site'       => \ChurchWebsiteConnector\current_identity(),
+		'expires'    => time() + TTL,
+	) + $operation;
+	if ( ! update_option( stage_name( $user_id ), $saved, false ) ) {
+		return error( 'storage', 'The preview could not be saved. No item was changed.', 503 );
+	}
+	if ( is_array( $old ) && isset( $old['token_hash'] ) ) {
+		wp_clear_scheduled_hook( EXPIRE_HOOK, array( $user_id, $old['token_hash'] ) );
+	}
+	wp_schedule_single_event( $saved['expires'], EXPIRE_HOOK, array( $user_id, $saved['token_hash'] ) );
+	return array(
+		'preview_token'  => $token,
+		'expires_at_utc' => gmdate( 'c', $saved['expires'] ),
+	);
+}
+
+function consume_preview( array $saved ): bool {
+	if ( ! conditional_delete( stage_name( get_current_user_id() ), $saved ) ) {
+		return false;
+	}
+	wp_clear_scheduled_hook( EXPIRE_HOOK, array( get_current_user_id(), $saved['token_hash'] ) );
+	return true;
 }
 
 function load_preview( mixed $token ) {
@@ -240,60 +303,116 @@ function load_preview( mixed $token ) {
 }
 
 function audit( array $saved, string $result ): void {
-    $rows = (array) get_option( AUDIT, [] );
-    array_unshift( $rows, [ 'time_utc' => gmdate( 'c' ), 'user_id' => get_current_user_id(), 'kind' => $saved['kind'], 'id' => $saved['id'], 'fields' => array_keys( $saved['changes'] ), 'result' => $result ] );
-    update_option( AUDIT, array_slice( $rows, 0, 50 ), false );
+	$rows = (array) get_option( AUDIT, array() );
+	array_unshift(
+		$rows,
+		array(
+			'time_utc'  => gmdate( 'Y-m-d\TH:i:s\Z' ),
+			'user_id'   => get_current_user_id(),
+			'kind'      => $saved['kind'],
+			'id'        => $saved['id'],
+			'fields'    => array_keys( $saved['changes'] ),
+			'operation' => $saved['operation'] ?? 'update',
+			'result'    => $result,
+		)
+	);
+	update_option( AUDIT, array_slice( $rows, 0, 50 ), false );
+}
+
+function lock_item( string $kind, int $id ): array|\WP_Error {
+	$lock_name = LOCK_PREFIX . $kind . '_' . $id;
+	$lock      = wp_json_encode(
+		array(
+			'expires' => time() + 120,
+			'token'   => wp_generate_uuid4(),
+		)
+	);
+	if ( ! add_option( $lock_name, $lock, '', false ) ) {
+		$old     = get_option( $lock_name, '' );
+		$decoded = json_decode( (string) $old, true );
+		if ( ! is_array( $decoded ) || ( $decoded['expires'] ?? PHP_INT_MAX ) >= time()
+			|| ! conditional_delete( $lock_name, $old ) || ! add_option( $lock_name, $lock, '', false ) ) {
+			return error( 'busy', 'Another connector update is running for this item.', 409 );
+		}
+	}
+	return array( $lock_name, $lock );
 }
 
 function apply( $input ) {
-    $checked = check_input( $input, [ 'site_url', 'preview_token', 'approved' ] );
-    if ( is_wp_error( $checked ) ) { return $checked; }
-    if ( ( $input['approved'] ?? false ) !== true ) { return error( 'approval', 'Apply only after approval, with approved=true.' ); }
-    $saved = load_preview( $input['preview_token'] ?? null );
-    if ( is_wp_error( $saved ) ) { return $saved; }
-    $lock_name = LOCK_PREFIX . $saved['kind'] . '_' . $saved['id'];
-    $lock = wp_json_encode( [ 'expires' => time() + 120, 'token' => wp_generate_uuid4() ] );
-    if ( ! add_option( $lock_name, $lock, '', false ) ) {
-        $old = get_option( $lock_name, '' ); $decoded = json_decode( (string) $old, true );
-        if ( ! is_array( $decoded ) || ( $decoded['expires'] ?? PHP_INT_MAX ) >= time() || ! conditional_delete( $lock_name, $old ) || ! add_option( $lock_name, $lock, '', false ) ) { return error( 'busy', 'Another connector update is running for this item.', 409 ); }
-    }
-    try {
-        $current = read_item( $saved['kind'], $saved['id'] );
-        if ( is_wp_error( $current ) ) { return $current; }
-        if ( ! hash_equals( $saved['state_hash'], $current['state_hash'] ) ) { return error( 'stale', 'The item changed after preview. Prepare a new preview.', 409 ); }
-        $changes = normalise_changes( $current, $saved['changes'] );
-        if ( is_wp_error( $changes ) ) { return $changes; }
-        if ( $changes !== $saved['changes'] ) { return error( 'stale', 'WordPress would now normalise the changes differently. Prepare a new preview.', 409 ); }
-        if ( ! conditional_delete( stage_name( get_current_user_id() ), $saved ) ) { return error( 'token', 'The preview was replaced, used or discarded. Prepare a new preview.', 409 ); }
-        wp_clear_scheduled_hook( EXPIRE_HOOK, [ get_current_user_id(), $saved['token_hash'] ] );
-        $result = dispatch( 'POST', route( $saved['kind'], $saved['id'] ), $changes );
-        if ( is_wp_error( $result ) ) {
-            audit( $saved, 'error' );
-            $data = $result->get_error_data();
-            return error( 'update_failed', $result->get_error_message() . ' Some fields may already have changed. Inspect the item before preparing another preview.', is_array( $data ) ? (int) ( $data['status'] ?? 500 ) : 500 );
-        }
-        $after = read_item( $saved['kind'], $saved['id'] );
-        audit( $saved, is_wp_error( $after ) ? 'verification_unavailable' : 'updated' );
-        return [ 'site_url' => \ChurchWebsiteConnector\bound_site(), 'updated' => true,
-            'kind' => $saved['kind'], 'id' => $saved['id'], 'changed_fields' => array_keys( $changes ),
-            'item' => is_wp_error( $after ) ? null : $after,
-            'message' => 'WordPress processed the update. Review returned stored values; native filters may normalise them. The preview token has been consumed.' ];
-    } catch ( \Throwable $e ) {
-        audit( $saved, 'error' );
-        return error( 'failed', 'The operation did not complete cleanly; some fields may already have changed. Inspect the item before retrying.', 500 );
-    } finally {
-        conditional_delete( $lock_name, $lock );
-    }
+	$checked = check_input( $input, array( 'site_url', 'preview_token', 'approved' ) );
+	if ( is_wp_error( $checked ) ) {
+		return $checked;
+	}
+	if ( ( $input['approved'] ?? false ) !== true ) {
+		return error( 'approval', 'Apply only after approval, with approved=true.' );
+	}
+	$saved = load_preview( $input['preview_token'] ?? null );
+	if ( is_wp_error( $saved ) ) {
+		return $saved;
+	}
+	if ( isset( $saved['operation'] ) ) {
+		return error( 'token', 'Use the apply tool for the operation named in the preview.', 409 );
+	}
+	$lock = lock_item( $saved['kind'], $saved['id'] );
+	if ( is_wp_error( $lock ) ) {
+		return $lock;
+	}
+	try {
+		$current = read_item( $saved['kind'], $saved['id'] );
+		if ( is_wp_error( $current ) ) {
+			return $current;
+		}
+		if ( ! hash_equals( $saved['state_hash'], $current['state_hash'] ) ) {
+			return error( 'stale', 'The item changed after preview. Prepare a new preview.', 409 );
+		}
+		$changes = normalise_changes( $current, $saved['changes'] );
+		if ( is_wp_error( $changes ) ) {
+			return $changes;
+		}
+		if ( $changes !== $saved['changes'] ) {
+			return error( 'stale', 'WordPress would now normalise the changes differently. Prepare a new preview.', 409 );
+		}
+		if ( ! consume_preview( $saved ) ) {
+			return error( 'token', 'The preview was replaced, used or discarded. Prepare a new preview.', 409 );
+		}
+		$result = dispatch( 'POST', route( $saved['kind'], $saved['id'] ), $changes );
+		if ( is_wp_error( $result ) ) {
+			audit( $saved, 'error' );
+			$data = $result->get_error_data();
+			return error( 'update_failed', $result->get_error_message() . ' Some fields may already have changed. Inspect the item before preparing another preview.', is_array( $data ) ? (int) ( $data['status'] ?? 500 ) : 500 );
+		}
+		$after = read_item( $saved['kind'], $saved['id'] );
+		audit( $saved, is_wp_error( $after ) ? 'verification_unavailable' : 'updated' );
+		return array(
+			'site_url'       => \ChurchWebsiteConnector\bound_site(),
+			'updated'        => true,
+			'kind'           => $saved['kind'],
+			'id'             => $saved['id'],
+			'changed_fields' => array_keys( $changes ),
+			'item'           => is_wp_error( $after ) ? null : $after,
+			'message'        => 'WordPress processed the update. Review returned stored values; native filters may normalise them. The preview token has been consumed.',
+		);
+	} catch ( \Throwable $e ) {
+		audit( $saved, 'error' );
+		return error( 'failed', 'The operation did not complete cleanly; some fields may already have changed. Inspect the item before retrying.', 500 );
+	} finally {
+		conditional_delete( $lock[0], $lock[1] );
+	}
 }
 
 function discard( $input ) {
-    $checked = check_input( $input, [ 'site_url', 'preview_token' ] );
-    if ( is_wp_error( $checked ) ) { return $checked; }
-    $saved = load_preview( $input['preview_token'] ?? null );
-    if ( is_wp_error( $saved ) ) { return $saved; }
-    if ( ! conditional_delete( stage_name( get_current_user_id() ), $saved ) ) { return error( 'token', 'The preview was already replaced or consumed.', 409 ); }
-    wp_clear_scheduled_hook( EXPIRE_HOOK, [ get_current_user_id(), $saved['token_hash'] ] );
-    return [ 'discarded' => true ];
+	$checked = check_input( $input, array( 'site_url', 'preview_token' ) );
+	if ( is_wp_error( $checked ) ) {
+		return $checked;
+	}
+	$saved = load_preview( $input['preview_token'] ?? null );
+	if ( is_wp_error( $saved ) ) {
+		return $saved;
+	}
+	if ( ! consume_preview( $saved ) ) {
+		return error( 'token', 'The preview was already replaced or consumed.', 409 );
+	}
+	return array( 'discarded' => true );
 }
 
 function register_abilities(): void {
