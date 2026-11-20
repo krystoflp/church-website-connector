@@ -19,6 +19,8 @@ const STATE       = 'church_connector_adapter_setup';
 const LOCK        = 'church_connector_adapter_setup_lock';
 const ACTION      = 'church_connector_setup_adapter';
 
+const RECOMMENDED_VERSION = '0.7.2';
+
 /** Return the minimum adapter version required by GeneratePress. */
 function minimum_version(): string {
 	return defined( '\GeneratePress_AI_MCP::MIN_ADAPTER_VERSION' ) ? \GeneratePress_AI_MCP::MIN_ADAPTER_VERSION : '0.6.1';
@@ -34,11 +36,22 @@ function status(): array {
 	if ( $available ) {
 		$message = $compatible ? __( 'A compatible MCP Adapter is available. No additional installation is needed.', 'church-website-connector' ) : __( 'The active MCP Adapter is too old. Update its providing plugin before continuing.', 'church-website-connector' );
 	}
+	$recommend_update = $compatible && '' !== $version && version_compare( $version, RECOMMENDED_VERSION, '<' );
+	if ( $recommend_update ) {
+		$message = sprintf(
+			/* translators: 1: active MCP Adapter version, 2: recommended minimum version. */
+			__( 'Update recommended. MCP Adapter %1$s is active. Update to %2$s or later.', 'church-website-connector' ),
+			$version,
+			RECOMMENDED_VERSION
+		);
+	}
 	return array(
-		'available'  => $available,
-		'compatible' => $compatible,
-		'version'    => $version,
-		'message'    => $message,
+		'available'          => $available,
+		'compatible'         => $compatible,
+		'update_recommended' => $recommend_update,
+		'level'              => $recommend_update ? 'yellow' : ( $compatible ? 'green' : 'red' ),
+		'version'            => $version,
+		'message'            => $message,
 	);
 }
 
@@ -47,7 +60,7 @@ function presentation(): array {
 	$native = status();
 	if ( $native['compatible'] || $native['available'] ) {
 		return array(
-			'level'   => $native['compatible'] ? 'success' : 'warning',
+			'level'   => 'green' === $native['level'] ? 'success' : 'warning',
 			'message' => $native['message'],
 		);
 	}

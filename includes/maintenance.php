@@ -236,7 +236,7 @@ function render_summary( array $status ): void {
 		__( 'Last release check', 'church-website-connector' ) => 'failed' === $updates['result'] ? 'red' : ( 'success' === $updates['result'] ? 'green' : 'yellow' ),
 		__( 'Last successful release check', 'church-website-connector' ) => $updates['last_success'] ? 'green' : 'yellow',
 		__( 'WordPress and plugin tools through MCP', 'church-website-connector' ) => $status['primary_connection']['level'],
-		__( 'MCP Adapter setup', 'church-website-connector' ) => Connector\AdapterSetup\status()['compatible'] ? 'green' : 'red',
+		__( 'MCP Adapter setup', 'church-website-connector' ) => Connector\AdapterSetup\status()['level'],
 	);
 	foreach ( $rows as $label => $value ) {
 		$level = $levels[ $label ] ?? 'green';

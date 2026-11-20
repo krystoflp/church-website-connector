@@ -29,7 +29,18 @@ namespace {
     function wp_send_json_error($data,$status){throw new RuntimeException('Denied '.$status);}
     $source=__DIR__.'/../includes/adapter-setup.php';if(!is_file($source)){$source=__DIR__.'/../church-website-connector/includes/adapter-setup.php';}require $source;
     use ChurchWebsiteConnector\AdapterSetup as A;
+    class AdapterVersionFixture {}
     $checks=0;function check($ok,$label){global $checks;$checks++;if(!$ok){throw new RuntimeException('FAILED '.$label);}}
+    if ( isset( $argv[1] ) ) {
+        $version = $argv[1];
+        if ( 'unknown' !== $version ) { define( 'WP_MCP_VERSION', $version ); }
+        class_alias( AdapterVersionFixture::class, 'WP\MCP\Core\McpAdapter' );
+        $status = A\status();
+        $expected = [ '0.5.0' => 'red', '0.7.1' => 'yellow', '0.7.2' => 'green', '0.7.3' => 'green', 'unknown' => 'green' ][$version];
+        check( $status['level'] === $expected && $status['compatible'] === ( 'red' !== $expected ) && $status['update_recommended'] === ( 'yellow' === $expected ), 'Adapter version policy ' . $version );
+        echo 'Adapter version policy passed: ' . $version . PHP_EOL;
+        return;
+    }
     check(!A\status()['available']&&!A\status()['compatible'],'Missing adapter is unavailable without loading native classes');
     check(isset($GLOBALS['actions']['wp_ajax_church_connector_setup_adapter'])&&!isset($GLOBALS['actions']['wp_ajax_nopriv_church_connector_setup_adapter']),'Installer endpoint is authenticated administrator AJAX only');
     $before=$GLOBALS['options'];$_SERVER['REQUEST_METHOD']='GET';try{A\ajax();}catch(RuntimeException $e){check($e->getMessage()==='Denied 405'&&$GLOBALS['options']===$before,'GET requests cannot mutate installation');}$_SERVER['REQUEST_METHOD']='POST';try{A\ajax();throw new RuntimeException('Nonce bypass');}catch(RuntimeException $e){check($e->getMessage()==='Nonce rejected'&&$GLOBALS['options']===$before,'Missing nonce causes no mutation');}
@@ -64,7 +75,8 @@ namespace {
     $result=A\run(true);check(!is_wp_error($result)&&$result['status']==='complete','Existing native adapter reused without installer files or network');
     check(!A\automatic_allowed()&&is_wp_error(A\run(true)),'Completed setup cannot auto-reactivate later');
     check(get_option(A\LOCK)===false,'Setup lock released');
-    check(A\presentation()['level']==='success','Only a currently loaded compatible adapter is presented as ready');
+    check(A\status()['compatible'] && A\status()['update_recommended'] && A\status()['level']==='yellow', 'Compatible 0.7.1 remains usable with an amber advisory');
+    check(A\presentation()['level']==='warning' && str_contains(A\presentation()['message'], 'Update recommended. MCP Adapter 0.7.1 is active. Update to 0.7.2 or later.'), 'Advisory identifies installed and recommended versions');
     A\schedule();add_option(A\LOCK,['expires'=>time()+60,'token'=>'other']);$before=$GLOBALS['options'];check(is_wp_error(A\run(true))&&$GLOBALS['options']===$before,'Concurrent setup refused without changing the pending request');
     unset($GLOBALS['options'][A\LOCK]);$r=A\finish('failed',str_repeat('<b>private</b>',500));check(strlen($r['message'])<=1600&&!str_contains($r['message'],'<b>'),'Outcome is bounded plain text');check(!A\automatic_allowed(),'Failure is not retried automatically');
     echo 'Adapter setup boundary checks passed ('.$checks.' checks)'.PHP_EOL;
