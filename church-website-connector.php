@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Church Website Connector
  * Description: Prepares GeneratePress AI and WP Rocket connections, allows the official Codex client, adds protected tools through MCP, and provides website configuration including Imagify PDF protection.
- * Version: 1.13.0
+ * Version: 1.13.1
  * Requires at least: 7.0
  * Requires PHP: 8.3
  * Author: Church Website Toolkit
@@ -17,7 +17,7 @@ namespace ChurchWebsiteConnector;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION  = '1.13.0';
+const VERSION  = '1.13.1';
 const SETTINGS = 'church_website_connector_settings';
 
 function settings(): array {

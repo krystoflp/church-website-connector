@@ -564,14 +564,14 @@ function commit( string $operation, array $plan, array $state ): array|\WP_Error
 		);
 	}
 
-	// Block a late status or content change in the underlying core save.
+	// pre_post_update supplies unslashed database values, including literal block JSON escapes.
 	$guard = static function ( $id_to_save, $data ) use ( $id, $state, $plan ) {
 		if ( $id_to_save !== $id ) {
 			return;
 		}
 		$original = $state['post'];
 		$status   = $plan['body']['status'] ?? $original->post_status;
-		if ( ( $data['post_status'] ?? '' ) !== $status || wp_unslash( $data['post_content'] ?? '' ) !== $original->post_content ) {
+		if ( ( $data['post_status'] ?? '' ) !== $status || ( $data['post_content'] ?? '' ) !== $original->post_content ) {
 			throw new \DomainException( 'The underlying save changed the reviewed status or content.' );
 		}
 	};
