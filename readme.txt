@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.13.0
+Stable tag: 1.13.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -545,6 +545,9 @@ adds filtered rule search, exact-path log counts, group management, selected
 batches, reviewed matching defaults and portable plain-rule import/export.
 
 == Changelog ==
+
+= 1.13.1 =
+* Fix interrupted saves when publishing or changing display conditions on GenerateBlocks overlays with hover or focus styles. The connector preserves the reviewed block content and still rejects unexpected content or status changes.
 
 = 1.13.0 =
 * Administrators can read the connector automatic-update preference and policy, last GitHub check attempt and success, and serious readiness issues through the existing connection status tool. It reads saved website data without starting an update check.

@@ -64,7 +64,7 @@ def main():
         blueprint = json.loads(template.replace('__CONNECTOR_VERSION__', version)
                                .replace('__CONNECTOR_ZIP_SHA256__', digest))
         blueprint['preferredVersions'] = {'wp': wp, 'php': '8.3'}
-        for name in ['maintenance-integration.php', 'updates-integration.php']:
+        for name in ['styled-overlay.php', 'maintenance-integration.php', 'updates-integration.php']:
             code = (tests / name).read_text().replace('__CURRENT_VERSION__', version).replace('__FUTURE_VERSION__', future)
             blueprint['steps'].insert(-1, {'step': 'runPHP', 'code': code})
         path = tmp / 'blueprint.json'
@@ -85,7 +85,7 @@ def main():
         if not (install['php'].startswith('8.3.') and install['admin_html_rendered'] and install['zip_sha256'] == digest
                 and status['anonymous_status_denied'] and admin['read_only_views'] and admin['admin_permissions']
                 and updater['native_upgrade_completed'] and updater['tampered_package_rejected']
-                and updater['settings_and_grants_preserved'] and rest['permissions_preserved']):
+                and updater['settings_and_grants_preserved'] and rest['permissions_preserved'] and report('styled-overlay')['published']):
             raise RuntimeError('Required native checks did not pass')
         print(f"Passed on WordPress {install['wordpress']} and PHP {install['php']}. "
               f"{admin['checks']} maintenance, {updater['checks']} updater, {rest['checks']} REST checks. ZIP SHA-256 {digest}")
