@@ -43,7 +43,7 @@ function rows( array $status ): array {
 		);
 	};
 	$add( 'WordPress', 'WordPress Abilities API', $d['wordpress_abilities'] ? 'Available' : 'Update WordPress to a supported release.', $d['wordpress_abilities'] ? 'green' : 'red' );
-	$add( 'adapter', 'MCP Adapter', Connector\AdapterSetup\presentation()['message'], $adapter['compatible'] ? 'green' : 'red' );
+	$add( 'adapter', 'MCP Adapter', Connector\AdapterSetup\presentation()['message'], $adapter['level'] );
 	$add( 'generatepress', 'GeneratePress AI', $d['generatepress_ai_version'] ? 'Active: ' . $d['generatepress_ai_version'] : 'Install and activate GeneratePress AI.', $d['generatepress_ai_version'] && Connector\GeneratePressBridge\supported_version( $d['generatepress_ai_version'] ) ? 'green' : 'red' );
 	$add( 'licence', 'GeneratePress One licence', true === $d['generatepress_license_cached_active'] ? 'Active in the cached local check' : 'Check or activate in Settings → GeneratePress AI.', true === $d['generatepress_license_cached_active'] ? 'green' : 'red' );
 	$blocks = $d['generateblocks_version'] && version_compare( $d['generateblocks_version'], '2.3', '>=' );

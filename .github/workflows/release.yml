@@ -31,6 +31,7 @@ jobs:
           php tests/updates.php
           php tests/integrations.php
           php tests/adapter-setup.php
+          for version in 0.5.0 0.7.1 0.7.2 0.7.3 unknown; do php tests/adapter-setup.php "$version"; done
           php tests/rocket-notice.php
           php tests/generatepress-setup.php
           php tests/defaults.php

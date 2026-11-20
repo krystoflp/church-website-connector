@@ -10,7 +10,7 @@ namespace ChurchWebsiteConnector\GeneratePressBridge {
  function supported_version($v){return version_compare($v,'1.0.0','>=')&&version_compare($v,'1.1.0','<');}
 }
 namespace ChurchWebsiteConnector\AdapterSetup {
- function status(){return $GLOBALS['adapter'];}
+ function status(){return $GLOBALS['adapter'] + ['level' => $GLOBALS['adapter']['compatible'] ? 'green' : 'red'];}
  function presentation(){return ['message'=>'Native adapter status'];}
 }
 namespace WPMedia\MCP\OAuth { class Bootstrap {} }

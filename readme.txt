@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.13.1
+Stable tag: 1.13.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -545,6 +545,9 @@ adds filtered rule search, exact-path log counts, group management, selected
 batches, reviewed matching defaults and portable plain-rule import/export.
 
 == Changelog ==
+
+= 1.13.2 =
+* Website Connector settings recommend MCP Adapter 0.7.2 or later for working installations on an older compatible version. The advisory shows the active and recommended versions and clears after updating.
 
 = 1.13.1 =
 * Fix interrupted saves when publishing or changing display conditions on GenerateBlocks overlays with hover or focus styles. The connector preserves the reviewed block content and still rejects unexpected content or status changes.
