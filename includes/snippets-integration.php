@@ -14,9 +14,21 @@ function filtered( array $data, bool $code = true ): array {
 function read( array $target ) {
     $ok = permission(); if ( is_wp_error( $ok ) ) { return $ok; }
     if ( $target['id'] === 0 ) { return [ 'data' => [ 'new_item' => true, 'active' => false ], 'state' => [ 'create', I\status( 'code-snippets' )['installed_version'] ] ]; }
+	$storage = I\WriteGuard\storage( $target );
+	if ( is_wp_error( $storage ) ) {
+		return $storage;
+	}
+	// The native item endpoint can reuse a list cached earlier in this request.
+	// Read the individual record underlying the newly captured storage snapshot.
+	wp_cache_delete( 'all_snippets_' . $storage['table'], \Code_Snippets\CACHE_GROUP );
     $data = I\native_rest( 'GET', '/code-snippets/v1/snippets/' . $target['id'], [ 'network' => false ] ); if ( is_wp_error( $data ) ) { return $data; }
     if ( ! is_array( $data ) || (int) ( $data['id'] ?? 0 ) !== $target['id'] || ! empty( $data['network'] ) || ! empty( $data['shared_network'] ) ) { return I\error( 'response', 'The native snippet response does not identify this site’s snippet.', 502 ); }
-    return [ 'data' => filtered( $data ), 'state' => filtered( $data ), 'raw' => $data ];
+	return array(
+		'data'          => filtered( $data ),
+		'state'         => array( filtered( $data ), I\fingerprint( $storage ) ),
+		'raw'           => $data,
+		'write_storage' => $storage,
+	);
 }
 function listing( int $page, int $limit ) {
     $ok = permission(); if ( is_wp_error( $ok ) ) { return $ok; }
@@ -42,14 +54,35 @@ function prepare( array $target, array $item, string $operation, array $changes 
     return [ 'changes' => $clean, 'diff' => $diff, 'code_review' => $code_execution ? array_intersect_key( array_replace( $item['data'], $clean ), array_flip( [ 'name', 'scope', 'priority', 'code' ] ) ) : null, 'code_execution' => $code_execution, 'warning' => $code_execution ? 'This approved change can execute code on the website. Review the complete snippet and explicitly approve code execution; apply requires acknowledge_code_execution=true. Native validation is not a guarantee of safe behaviour.' : ( $operation === 'create' ? 'Creates an inactive snippet only. Activation requires a separate reviewed preview.' : 'Preview only. Native Code Snippets permissions and locks are preserved.' ) ];
 }
 function write( array $target, array $item, string $operation, array $changes ) {
-    $ok = permission(); if ( is_wp_error( $ok ) ) { return $ok; }
+	$allowed = permission();
+	if ( is_wp_error( $allowed ) ) {
+		return $allowed;
+	}
+	if ( 'create' === $operation ) {
+		return save( $target, $item, $operation, $changes );
+	}
+	return I\WriteGuard\run( $target, $item, $operation, static fn() => save( $target, $item, $operation, $changes ) );
+}
+
+function save( array $target, array $item, string $operation, array $changes ) {
     if ( $operation === 'create' ) { $result = I\native_rest( 'POST', '/code-snippets/v1/snippets', $changes + [ 'active' => false, 'network' => false ] ); }
     elseif ( $operation === 'update' ) { $result = I\native_rest( 'POST', '/code-snippets/v1/snippets/' . $target['id'], $changes + [ 'network' => false ] ); }
-    elseif ( $operation === 'trash' ) { if ( ! empty( $item['data']['trashed'] ) ) { return I\error( 'trash', 'The snippet is already in Trash; permanent deletion is not exposed.' ); } $result = I\native_rest( 'DELETE', '/code-snippets/v1/snippets/' . $target['id'], [ 'network' => false ] ); }
-    else { $result = I\native_rest( 'POST', '/code-snippets/v1/snippets/' . $target['id'] . '/' . $operation, [ 'network' => false ] ); }
+	elseif ( 'trash' === $operation ) {
+		// The native REST DELETE permanently removes a record that just entered Trash.
+		$result = \Code_Snippets\trash_snippet( $target['id'], false );
+		if ( ! $result ) {
+			return I\error( 'trash', 'Code Snippets refused to move the snippet to Trash.', 409 );
+		}
+	} else {
+		$result = I\native_rest( 'POST', '/code-snippets/v1/snippets/' . $target['id'] . '/' . $operation, array( 'network' => false ) );
+	}
     if ( is_wp_error( $result ) ) { return $result; }
     $id = $operation === 'create' ? (int) ( $result['id'] ?? 0 ) : $target['id']; if ( $id < 1 ) { return I\error( 'response', 'The native snippet write did not return an item ID.', 502 ); }
     $after = read( array_replace( $target, [ 'id' => $id ] ) ); if ( is_wp_error( $after ) ) { return $after; }
+	if ( 'update' === $operation && (bool) $after['data']['active'] !== (bool) $item['data']['active'] ) {
+		$message = $after['data']['active'] ? 'The updated snippet is unexpectedly active.' : 'Code Snippets saved the update but the snippet is now inactive. Check its native validation result before reactivating it.';
+		return I\error( 'readback', $message, 409 );
+	}
     if ( $operation === 'create' && ! empty( $after['data']['active'] ) ) { return I\error( 'readback', 'The snippet was unexpectedly activated; inspect it immediately.', 502 ); }
     if ( $operation === 'activate' && empty( $after['data']['active'] ) && ( $after['data']['scope'] ?? '' ) !== 'single-use' ) { return I\error( 'readback', 'The native plugin did not activate the snippet. Inspect its validation error.', 502 ); }
     if ( $operation === 'deactivate' && ! empty( $after['data']['active'] ) ) { return I\error( 'readback', 'The native plugin did not deactivate the snippet.', 502 ); }

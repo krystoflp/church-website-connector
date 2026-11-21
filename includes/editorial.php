@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ChurchWebsiteConnector\Editorial;
 
 use ChurchWebsiteConnector as Connector;
+use ChurchWebsiteConnector\PostFiles;
 use ChurchWebsiteConnector\PostTools;
 use ChurchWebsiteConnector\RestTools;
 
@@ -81,7 +82,26 @@ function search( string $collection, $input ): array|\WP_Error {
 
 	$request = new \WP_REST_Request( 'GET', '/wp/v2/' . $collection );
 	$request->set_query_params( $params );
-	$response = rest_do_request( $request );
+	// Core treats both bounds as exclusive. Include midnight for date-only starts.
+	$hook      = $media ? 'rest_attachment_query' : 'rest_post_query';
+	$inclusive = static function ( $args, $incoming ) use ( $request ) {
+		if ( $request === $incoming ) {
+			foreach ( $args['date_query'] ?? array() as $index => $clause ) {
+				if ( ( $clause['after'] ?? null ) === $request['after'] && 'post_date' === ( $clause['column'] ?? '' ) ) {
+					$args['date_query'][ $index ]['inclusive'] = true;
+				}
+			}
+		}
+		return $args;
+	};
+	if ( isset( $input['after'] ) && 10 === strlen( $input['after'] ) ) {
+		add_filter( $hook, $inclusive, 10, 2 );
+	}
+	try {
+		$response = rest_do_request( $request );
+	} finally {
+		remove_filter( $hook, $inclusive, 10 );
+	}
 	if ( is_wp_error( $response ) || $response->get_status() >= 400 ) {
 		return RestTools\error( 'search_denied', 'WordPress refused the search or this results page is unavailable.', is_wp_error( $response ) ? 500 : $response->get_status() );
 	}
@@ -185,7 +205,7 @@ function apply_revision( $input ): array|\WP_Error {
 
 function plan( string $operation, array $state, array $input ): array|\WP_Error {
 	if ( 'restore_revision' === $operation ) {
-		$plan = revision( $state, $input['revision_id'] ?? null );
+		$plan = revision( $state, $input['revision_id'] ?? null, true );
 		return is_array( $plan ) && ! $plan['body'] ? RestTools\error( 'unchanged', 'The selected revision matches the current fields.', 409 ) : $plan;
 	}
 	$post = $state['post'];
@@ -204,11 +224,15 @@ function plan( string $operation, array $state, array $input ): array|\WP_Error 
 		return RestTools\error( 'post_visibility', 'Use the WordPress editor to manage publication of a password-protected item.', 409 );
 	}
 
-	$review = $cancel ? $state['review'] : PostTools\review_files( $state['review'] );
+	$review = $cancel ? $state['review'] : PostTools\review_files( $state );
 	if ( is_wp_error( $review ) ) {
 		return $review;
 	}
-	$date = PostTools\local_date( $cancel ? $review['date_local'] : ( $input['date_local'] ?? null ) );
+	// Cancelling uses the already reviewed stored instant, including repeated local times.
+	$date = $cancel ? array(
+		'local' => $post->post_date,
+		'gmt'   => $post->post_date_gmt,
+	) : PostTools\local_date( $input['date_local'] ?? null );
 	if ( is_wp_error( $date ) ) {
 		return $date;
 	}
@@ -235,6 +259,11 @@ function plan( string $operation, array $state, array $input ): array|\WP_Error 
 			'post_date_gmt' => $date['gmt'],
 		),
 	);
+	if ( $cancel ) {
+		unset( $plan['body']['date_gmt'] );
+	} else {
+		$plan['verify_files'] = true;
+	}
 	if ( ! $page ) {
 		$plan['schedule_timestamp'] = $cancel ? false : $date['timestamp'];
 	}
@@ -244,7 +273,7 @@ function plan( string $operation, array $state, array $input ): array|\WP_Error 
 	return $plan;
 }
 
-function revision( array $state, mixed $revision_id ): array|\WP_Error {
+function revision( array $state, mixed $revision_id, bool $for_restore = false ): array|\WP_Error {
 	$post     = $state['post'];
 	$revision = is_int( $revision_id ) && $revision_id > 0 ? wp_get_post_revision( $revision_id ) : null;
 	if ( ! $revision || $revision->post_parent !== $post->ID || wp_is_post_autosave( $revision ) ) {
@@ -275,6 +304,38 @@ function revision( array $state, mixed $revision_id ): array|\WP_Error {
 	if ( 'publish' === $post->post_status && ! current_user_can( get_post_type_object( $post->post_type )->cap->publish_posts ) ) {
 		return RestTools\error( 'post_publish_permission', 'Your account cannot approve changes to this published item.', 403 );
 	}
+	$guards = array();
+	if ( $for_restore && 'future' === $post->post_status ) {
+		$due   = get_post_datetime( $post, 'date', 'gmt' );
+		$event = wp_next_scheduled( 'publish_future_post', array( $post->ID ) );
+		if ( ! $due || $event !== $due->getTimestamp() || $event < time() + MINUTE_IN_SECONDS ) {
+			return RestTools\error( 'revision_schedule', 'Review the scheduled publication event with the scheduling workflow before restoring this revision.', 409 );
+		}
+		$guards['preserve_event']             = $event;
+		$guards['schedule_timestamp']         = $event;
+		$guards['minimum_schedule_timestamp'] = $event;
+	}
+	if ( isset( $body['content'] ) ) {
+		$files = PostFiles\content_files( $revision->post_content );
+		unset( $review['synced_patterns'], $review['pattern_review_issue'] );
+		$review = array_replace( $review, is_wp_error( $files ) ? array( 'file_blocks' => array() ) : PostFiles\describe_content( $files ) );
+		$public = in_array( $post->post_status, array( 'publish', 'future' ), true );
+		if ( $public ) {
+			$guards['verify_files'] = true;
+			$files                  = is_wp_error( $files ) ? $files : PostTools\review_files( array( 'review' => $review ) + $files );
+			if ( is_wp_error( $files ) ) {
+				$message = 'The revision contains a file reference that needs review before restoring it to this post.';
+				$private = RestTools\review_response( $files );
+				$issue   = $message . ' ' . ( $private['message'] ?? $files->get_error_message() );
+				if ( $for_restore ) {
+					return RestTools\review_error( 'church_connector_rest_revision_file', $message, $issue, array( 'status' => 409 ) + RestTools\review_details( $files ) );
+				}
+				$review['file_review_issue'] = $issue;
+			} else {
+				$review = $files;
+			}
+		}
+	}
 	$review['change'] = array(
 		'revision_id'  => $revision_id,
 		'date_gmt'     => $revision->post_date_gmt,
@@ -285,5 +346,5 @@ function revision( array $state, mixed $revision_id ): array|\WP_Error {
 		'review'   => $review,
 		'body'     => $body,
 		'expected' => $expected,
-	);
+	) + $guards;
 }

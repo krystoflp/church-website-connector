@@ -13,6 +13,7 @@ const LOG = 'church_connector_used_css_log';
 const LOCK = 'church_connector_used_css_lock';
 const LAST = 'church_connector_used_css_last_clear';
 const GRANTEE = 'church_connector_used_css_grantee';
+const GRANT_LOCK = 'church_connector_used_css_grant_lock';
 const COOLDOWN = 60;
 
 function error( string $code, string $message, int $status = 400 ): \WP_Error {
@@ -42,9 +43,9 @@ function environment() {
     if ( ! function_exists( 'get_rocket_option' ) || ! get_rocket_option( 'remove_unused_css', 0 ) ) {
         return error( 'disabled', 'WP Rocket Remove Unused CSS is not enabled.', 503 );
     }
-    if ( ! function_exists( 'rocket_clean_domain' ) || ! function_exists( 'rocket_clean_files' ) ) {
-        return error( 'unavailable', 'The WP Rocket cache functions are unavailable.', 503 );
-    }
+	if ( ! function_exists( 'rocket_clean_domain' ) ) {
+		return error( 'unavailable', 'The WP Rocket cache functions are unavailable.', 503 );
+	}
     try {
         $container = apply_filters( 'rocket_container', null );
         if ( ! is_object( $container ) || ! is_callable( [ $container, 'get' ] ) ) {
@@ -66,21 +67,158 @@ function environment() {
     }
 }
 
-function activate(): void {
-    $ready = environment();
-    if ( is_wp_error( $ready ) ) {
-        wp_die( esc_html( $ready->get_error_message() ) );
-    }
-    if ( ! current_user_can( 'manage_options' ) || ! current_user_can( 'rocket_remove_unused_css' ) ) {
-        wp_die( 'Only an administrator with WP Rocket Used CSS permission can activate this helper.' );
-    }
-    $user = wp_get_current_user();
-    if ( ! $user->has_cap( CAP ) ) {
-        $user->add_cap( CAP );
-        $grantees = (array) get_option( GRANTEE, [] );
-        $grantees[] = $user->ID;
-        update_option( GRANTEE, array_values( array_unique( $grantees ) ), false );
-    }
+/** Read the single physical capabilities row. WordPress normally stores one per user and site. */
+function direct_capabilities( \WP_User $user ) {
+	global $wpdb;
+	$rows = $wpdb->get_results( $wpdb->prepare( 'SELECT umeta_id, meta_value FROM %i WHERE user_id = %d AND meta_key = %s LIMIT 2', $wpdb->usermeta, $user->ID, $user->cap_key ) );
+	if ( $wpdb->last_error || ! is_array( $rows ) || count( $rows ) > 1 ) {
+		return error( 'grant_storage', 'The account permissions could not be read unambiguously. Review the account and try again.', 500 );
+	}
+	if ( ! $rows ) {
+		return null;
+	}
+	$row       = $rows[0];
+	$row->caps = maybe_unserialize( $row->meta_value );
+	return is_array( $row->caps ) ? $row : error( 'grant_storage', 'WordPress has no usable capability list for this account.', 500 );
+}
+
+/** Merge one direct permission using the exact stored bytes, including on case-insensitive databases. */
+function change_direct_capability( \WP_User $user, bool $grant ): true|\WP_Error {
+	global $wpdb;
+	$failure = error( 'grant_storage', 'WordPress could not save the Used CSS permission change. Review the account and try again.', 500 );
+	try {
+		for ( $attempt = 0; $attempt < 3; ++$attempt ) {
+			wp_cache_delete( $user->ID, 'user_meta' );
+			$user->for_site();
+			$row = direct_capabilities( $user );
+			if ( is_wp_error( $row ) ) {
+				return $row;
+			}
+			// The permission check and the conditional write must see the same account state.
+			if ( null !== $row && $user->caps !== $row->caps ) {
+				continue;
+			}
+			if ( $grant && ( ! $user->has_cap( 'manage_options' ) || ! $user->has_cap( 'rocket_remove_unused_css' ) ) ) {
+				return error( 'forbidden', 'The account no longer has permission to activate Used CSS clearing.', 403 );
+			}
+			if ( null === $row ) {
+				return $grant ? $failure : true;
+			}
+			if ( ! empty( $row->caps[ CAP ] ) === $grant || ( $grant && $user->has_cap( CAP ) ) ) {
+				return true;
+			}
+			$next = $row->caps;
+			if ( $grant ) {
+				$next[ CAP ] = true;
+			} else {
+				unset( $next[ CAP ] );
+			}
+			if ( sanitize_meta( $user->cap_key, $next, 'user', get_object_subtype( 'user', $user->ID ) ) !== $next ) {
+				return $failure;
+			}
+			// Preserve the native user-metadata veto and notifications for this conditional write.
+			$check = apply_filters( 'update_user_metadata', null, $user->ID, $user->cap_key, $next, $row->caps );
+			if ( null === $check ) {
+				do_action( 'update_user_meta', (int) $row->umeta_id, $user->ID, $user->cap_key, $next );
+				$written = $wpdb->query(
+					$wpdb->prepare(
+						'UPDATE %i SET meta_value = %s WHERE umeta_id = %d AND user_id = %d AND meta_key = %s AND HEX(meta_value) = %s',
+						$wpdb->usermeta,
+						maybe_serialize( $next ),
+						$row->umeta_id,
+						$user->ID,
+						$user->cap_key,
+						strtoupper( bin2hex( $row->meta_value ) )
+					)
+				);
+				if ( false === $written ) {
+					return $failure;
+				}
+				if ( 0 === $written ) {
+					continue;
+				}
+				wp_cache_delete( $user->ID, 'user_meta' );
+				do_action( 'updated_user_meta', (int) $row->umeta_id, $user->ID, $user->cap_key, $next );
+			} elseif ( ! $check ) {
+				return $failure;
+			}
+			$saved = direct_capabilities( $user );
+			return ! is_wp_error( $saved ) && ! empty( $saved->caps[ CAP ] ) === $grant ? true : $failure;
+		}
+		return $failure;
+	} finally {
+		wp_cache_delete( $user->ID, 'user_meta' );
+		$user->for_site();
+	}
+}
+
+function activate(): true|\WP_Error {
+	$ready = environment();
+	if ( is_wp_error( $ready ) ) {
+		return $ready;
+	}
+	if ( ! current_user_can( 'manage_options' ) || ! current_user_can( 'rocket_remove_unused_css' ) ) {
+		return error( 'forbidden', 'Only an administrator with WP Rocket Used CSS permission can activate this helper.', 403 );
+	}
+	$lock = acquire_lock( GRANT_LOCK );
+	if ( is_wp_error( $lock ) ) {
+		return $lock;
+	}
+	try {
+		$user = wp_get_current_user();
+		wp_cache_delete( $user->ID, 'user_meta' );
+		$user->for_site();
+		if ( $user->has_cap( CAP ) && empty( $user->caps[ CAP ] ) ) {
+			// A permission supplied by a role or a filter belongs to that provider.
+			return true;
+		}
+		$grantees = array_map( 'intval', (array) get_option( GRANTEE, array() ) );
+		if ( ! in_array( $user->ID, $grantees, true ) ) {
+			$grantees[] = $user->ID;
+			update_option( GRANTEE, $grantees, false );
+			if ( get_option( GRANTEE ) !== $grantees ) {
+				return error( 'grant_storage', 'WordPress could not record the Used CSS permission. Review settings and try again.', 500 );
+			}
+		}
+		return change_direct_capability( $user, true );
+	} finally {
+		release_lock( $lock, GRANT_LOCK );
+	}
+}
+
+/** Include direct connector grants left untracked by older versions. Role grants belong to their provider. */
+function revoke_grants(): true|\WP_Error {
+	global $wpdb;
+	$lock = acquire_lock( GRANT_LOCK );
+	if ( is_wp_error( $lock ) ) {
+		return $lock;
+	}
+	try {
+		$direct = get_users(
+			array(
+				'capability' => CAP,
+				'fields'     => 'ID',
+			)
+		);
+		if ( $wpdb->last_error ) {
+			return error( 'grant_storage', 'WordPress could not read the Used CSS permissions. Check settings and try again.', 500 );
+		}
+		$users = array_unique( array_merge( $direct, (array) get_option( GRANTEE, array() ) ) );
+		foreach ( $users as $user_id ) {
+			$user = get_current_user_id() === (int) $user_id ? wp_get_current_user() : get_user_by( 'id', (int) $user_id );
+			if ( ! $user ) {
+				continue;
+			}
+			$removed = change_direct_capability( $user, false );
+			if ( is_wp_error( $removed ) ) {
+				return $removed;
+			}
+		}
+		delete_option( GRANTEE );
+		return false === get_option( GRANTEE, false ) ? true : error( 'grant_storage', 'WordPress could not remove the Used CSS permission records.', 500 );
+	} finally {
+		release_lock( $lock, GRANT_LOCK );
+	}
 }
 
 function register_abilities(): void {
@@ -159,7 +297,16 @@ function target( $input ) {
     if ( ! $parts || ( $parts['scheme'] ?? '' ) !== 'https' || ( $parts['host'] ?? '' ) !== wp_parse_url( site(), PHP_URL_HOST ) || isset( $parts['port'] ) || isset( $parts['user'] ) || isset( $parts['pass'] ) || isset( $parts['fragment'] ) || ! canonical_path_allowed( $parts['path'] ?? '' ) ) {
         return error( 'invalid_page', 'The canonical page address must belong to the configured website.' );
     }
-    return [ 'scope' => 'page', 'post_id' => $post->ID, 'url' => untrailingslashit( $url ) ];
+	// WP Rocket also removes query-variant directories below a URL when purging its disk cache.
+	if ( isset( $parts['query'] ) || ( '' === (string) get_option( 'permalink_structure' ) && untrailingslashit( $url ) === site() )
+		|| ( function_exists( 'get_rocket_cache_query_string' ) && get_rocket_cache_query_string() ) ) {
+		return error( 'shared_cache_path', 'WP Rocket can clear other query-string addresses from this cache path. A single-page clear cannot isolate it. If the whole website should be cleared, choose whole-site scope and confirm it separately.', 409 );
+	}
+	return array(
+		'scope'   => 'page',
+		'post_id' => $post->ID,
+		'url'     => $url,
+	);
 }
 
 function canonical_path_allowed( string $path ): bool {
@@ -172,32 +319,71 @@ function canonical_path_allowed( string $path ): bool {
 }
 
 // Conditional deletion avoids releasing another request's lock during stale-lock recovery.
-function release_lock( string $value ): void {
-    global $wpdb;
-    $wpdb->delete( $wpdb->options, [ 'option_name' => LOCK, 'option_value' => $value ], [ '%s', '%s' ] );
-    wp_cache_delete( LOCK, 'options' );
+function release_lock( string $value, string $name = LOCK ): void {
+	global $wpdb;
+	$wpdb->delete(
+		$wpdb->options,
+		array(
+			'option_name'  => $name,
+			'option_value' => $value,
+		),
+		array( '%s', '%s' )
+	);
+	wp_cache_delete( $name, 'options' );
 }
 
-function acquire_lock() {
-    $value = wp_json_encode( [ 'expires' => time() + 120, 'token' => wp_generate_uuid4() ] );
-    if ( add_option( LOCK, $value, '', false ) ) {
-        return $value;
-    }
-    $previous = (string) get_option( LOCK, '' );
-    $decoded = json_decode( $previous, true );
-    if ( is_array( $decoded ) && isset( $decoded['expires'] ) && $decoded['expires'] < time() ) {
-        release_lock( $previous );
-        if ( add_option( LOCK, $value, '', false ) ) {
-            return $value;
-        }
-    }
-    return error( 'busy', 'Another Used CSS clearing request is running. Try again shortly.', 429 );
+function acquire_lock( string $name = LOCK ) {
+	global $wpdb;
+	$value   = wp_json_encode(
+		array(
+			'expires' => time() + 120,
+			'token'   => wp_generate_uuid4(),
+		)
+	);
+	$written = $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", $name, $value ) );
+	if ( 0 === $written ) {
+		$previous = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", $name ) );
+		$decoded  = is_string( $previous ) ? json_decode( $previous, true ) : null;
+		if ( is_array( $decoded ) && isset( $decoded['expires'] ) && $decoded['expires'] < time() ) {
+			$written = $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND HEX(option_value) = HEX(%s)", $value, $name, $previous ) );
+		}
+	}
+	if ( 1 === $written ) {
+		wp_cache_delete( $name, 'options' );
+		wp_cache_delete( 'notoptions', 'options' );
+		return $value;
+	}
+	return false === $written ? error( 'lock_storage', 'WordPress could not store the Used CSS lock. Check the database and retry.', 503 ) : error( 'busy', 'Another Used CSS operation is running. Try again shortly.', 429 );
 }
 
 function audit( array $record ): void {
-    $rows = (array) get_option( LOG, [] );
-    array_unshift( $rows, array_merge( [ 'time_utc' => gmdate( 'c' ), 'user_id' => get_current_user_id() ], $record ) );
-    update_option( LOG, array_slice( $rows, 0, 50 ), false );
+	$entry = array(
+		'time_utc' => gmdate( 'Y-m-d\TH:i:s\Z' ),
+		'user_id'  => get_current_user_id(),
+	);
+	\ChurchWebsiteConnector\RestTools\append_audit( LOG, array_merge( $entry, $record ) );
+}
+
+/** Keep WP Rocket's Varnish request scoped to the exact canonical URL of this page. */
+function clear_page( $controller, string $canonical ): void {
+	$url     = untrailingslashit( $canonical );
+	$host    = wp_parse_url( $canonical, PHP_URL_HOST );
+	$path    = wp_parse_url( $canonical, PHP_URL_PATH ) ?? '/';
+	$varnish = trailingslashit( $path );
+	$exact   = static function ( $parts ) use ( $host, $path, $varnish ) {
+		// WP Rocket 3.24's page subscriber appends "/?regex", which the Varnish sender expands to ".*".
+		if ( 'regex' === ( $parts['query'] ?? '' ) && 'https' === ( $parts['scheme'] ?? '' ) && ( $parts['host'] ?? '' ) === $host && ( $parts['path'] ?? '' ) === $varnish ) {
+			$parts['query'] = '';
+			$parts['path']  = $path;
+		}
+		return $parts;
+	};
+	add_filter( 'rocket_parse_url', $exact, PHP_INT_MIN );
+	try {
+		$controller->clear_url_usedcss( $url );
+	} finally {
+		remove_filter( 'rocket_parse_url', $exact, PHP_INT_MIN );
+	}
 }
 
 function clear( $input ) {
@@ -223,7 +409,11 @@ function clear( $input ) {
             return error( 'cooldown', 'Wait ' . $remaining . ' seconds before another Used CSS clear.', 429 );
         }
         // Reserve the cooldown before any side effect, including partially failing operations.
-        update_option( LAST, time(), false );
+		$reserved = time();
+		update_option( LAST, $reserved, false );
+		if ( (int) get_option( LAST, 0 ) !== $reserved ) {
+			return error( 'cooldown_storage', 'WordPress could not reserve the Used CSS cooldown. Check the database and retry.', 503 );
+		}
         if ( $target['scope'] === 'site' ) {
             $result = $services['subscriber']->truncate( [] );
             if ( ! is_array( $result ) || ( $result['status'] ?? null ) !== 'success' || (int) $services['query']->get_completed_count() !== 0 ) {
@@ -231,11 +421,12 @@ function clear( $input ) {
             }
             rocket_clean_domain();
         } else {
-            $services['controller']->clear_url_usedcss( $target['url'] );
+			$canonical     = $target['url'];
+			$target['url'] = untrailingslashit( $canonical );
+			clear_page( $services['controller'], $canonical );
             if ( $services['query']->get_rows_by_url( $target['url'] ) ) {
                 throw new \RuntimeException( 'Page Used CSS clearing could not be verified.' );
             }
-            rocket_clean_files( $target['url'] );
         }
         $result = array_merge( $target, [
             'site_url' => site(),
@@ -306,6 +497,10 @@ function admin_clear(): void {
     }
     wp_safe_redirect( admin_url( 'tools.php?page=church-connector-used-css' ) );
     exit;
+}
+
+if ( defined( 'WP_UNINSTALL_PLUGIN' ) ) {
+	return;
 }
 
 add_action( 'wp_abilities_api_init', __NAMESPACE__ . '\\register_abilities' );

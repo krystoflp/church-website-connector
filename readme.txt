@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.13.2
+Stable tag: 1.13.5
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -14,7 +14,7 @@ each compatible website; no site-specific code or ZIP rebuild is needed.
 
 In Settings → Website Connector → Settings, select “Prevent Imagify from optimising PDFs” to help preserve each PDF’s own language declaration and accessibility information. Only the pdf entry is removed through Imagify’s documented imagify_get_mime_types filter. Images and other code’s exclusions are preserved. Applies to automatic uploads, bulk/manual optimisation and background workers without an MCP connection.
 
-On for new installations and once on upgrade when the setting is missing. Explicit disabled/enabled choices are retained on later upgrades, reactivation and site rebinding. The existing site-binding rule pauses copied/moved settings until an administrator reviews and saves them. The module uses the existing settings form, permissions and nonce.
+On for new installations and once on upgrade when the setting is missing. Explicit disabled/enabled choices are retained on later upgrades, reactivation and site rebinding. On an upgrade from older settings, the local PDF exclusion remains active when both saved website addresses still match. Connection tools keep their separate address review. A changed address pauses protection until an administrator reviews and saves the settings. The module uses the existing settings form, permissions and nonce.
 
 Requires Imagify 2.3.1+; verified against 2.3.5. Harmless when Imagify is absent/inactive. Settings, connection status, diagnostic report and Site Health Info show the saved and effective states, including an unsupported version or conflicting filter. No external request is made by this feature.
 
@@ -240,8 +240,14 @@ Supported and locally tested native plugins:
   submit_on_enter and invalid_field_focus. Existing actions/conditionals remain
   server-side; native deletion repairs references to removed design items. Submission responses, exports, resend actions,
   notification credentials, licence settings and global WS Form options are not
-  exposed. Native auto-publishing, when enabled, can publish design edits;
-  editing such a published form also requires native publish_form permission.
+  exposed. Each design preview explains whether applying it saves a draft or
+  publishes a change to the current public form. Automatic edits stop if the form already has unpublished changes. Save draft edits with automatic publication off, or review and explicitly publish the pending draft first. A change
+  to automatic publication requires a fresh preview for a published form. Editing it
+  with automatic publication enabled requires native publish_form permission.
+  New-form previews include WS Form’s standard consent checkbox and Submit
+  button. The connector verifies the saved draft against the reviewed layout.
+  If creation stops after a form has been allocated, inspect the returned form
+  ID in WS Form before starting another creation.
 
 Version ranges are guards, not claims that every version in a range was tested.
 Unsupported/missing native interfaces pause the integration. A selected helper
@@ -254,8 +260,7 @@ preview/approval requirements. Only the documented
 editable subset is available; use integration-capabilities for exact schemas.
 WS Form field metadata follows its native AI schema (for example required='on'
 or ''), and preserves existing IDs/types in full-design updates. Use structural
-operations for adding/removing items. Designs are bounded to 20 tabs, 100 sections,
-100 fields and 256 KiB; lists return at most 50 items per request.
+operations for adding/removing items. Creation accepts up to 20 tabs, 100 sections and 100 requested fields. Whole-design edits accept the existing structure, including native controls. The 256 KiB payload limit applies; lists return at most 50 items per request.
 
 MCP ability names (prefix church-connector/):
 * integration-capabilities
@@ -472,7 +477,10 @@ own grant. Execution rechecks permissions and readiness.
 
 Prefer the smallest scope: a published, non-password-protected page/post ID.
 The request must identify the exact bound website; canonical addresses must stay
-on that HTTPS host and within its base path. Arbitrary URL input is rejected.
+on that HTTPS host and within its base path. WP Rocket receives the exact
+canonical path for a one-page Varnish purge. If the address or query-string
+cache configuration shares a path with other pages, the connector stops
+before clearing anything. A broader clear requires a separate decision.
 Whole-site clearing requires scope=site and confirm_site=true, plus explicit user
 authorisation. Scope/approval flags are client acknowledgements, not independent
 proof of human consent on the website. They do not replace native permissions.
@@ -532,6 +540,9 @@ Search editable media by filename, title, MIME type or upload dates. Find posts
 by category, date, status or text. Use a reviewed preview to schedule, reschedule
 or cancel a post or page, or to publish a draft page immediately. The apply tools
 verify the saved date and native WordPress publication event where applicable.
+Date-only searches include midnight on the first day. A repeated-hour schedule
+can be cancelled using its saved UTC instant. If a page move affects more than
+100 descendants under pretty permalinks, use the native editor to review it.
 Compare and restore a saved revision's title, content and excerpt. Preview
 adding, relabelling, retargeting or moving a link in an existing classic menu.
 Inspect locations, exclusions and audiences for GeneratePress Premium Elements.
@@ -545,6 +556,42 @@ adds filtered rule search, exact-path log counts, group management, selected
 batches, reviewed matching defaults and portable plain-rule import/export.
 
 == Changelog ==
+
+= 1.13.5 =
+
+* Granting or removing Used CSS access preserves other permissions saved for the same WordPress user during the change.
+* Keep local Imagify PDF protection active during a same-address upgrade. A single-page cache clear stops if the cache configuration would also clear other pages or query variants.
+* Check WS Form publication status and the visitor-facing design at the native save. A draft-only approval cannot authorise newly public changes.
+* Review PDFs inside synced patterns, check the attachment again at publication, and preserve the scheduled publication event during revision restoration. Page moves check whether the reviewed public addresses can resolve.
+* Show refreshed Element content and the full effect of display rules. Preserve independent changes to form settings, SEO settings, snippets and redirect destinations. Menu label edits preserve stored descriptions and formatting.
+* Check existing redirect rules that inherit a changed matching default, and check for loops when enabling rules or groups.
+* WordPress verifies the offered version, official release, package checksum and unpacked connector version before replacing the installed plugin.
+
+* Upgrading an existing installation requires an administrator to confirm the displayed addresses once in Settings > Website Connector. Saved helper choices are retained. Prepare fresh approvals for edits started before this upgrade.
+* Show changed publication content, page-move slugs and affected page links. Check the actual schedule, revision PDFs and stored metadata before confirming an edit. Partial menu results identify completed changes.
+* Deliver private replacement reviews to the signed-in MCP caller. Keep the approval token and the reviewed content out of provider error logs.
+* Preserve native form choices, SEO Framework settings and snippet activation. Large WS Forms support paged reads and targeted edits. Use the native form editor to change complex choice options. Trashing a snippet always leaves it recoverable.
+* Preview affected redirect rules and use the saved matching defaults. Preserve logging exclusions during transfers and enforce the supported rule count before writes.
+* Limit single-page cache eviction, verify Used CSS permissions and cooldowns, recognise grouped PDF formats, and retain concurrent activity entries.
+* Verify connection routes, dependency activation, local update offers and managed-package checksums. Keep the last verified update offer for up to 24 hours during a temporary outage.
+
+* A stale edit can return a fresh preview for approval. File-block mismatches name both PDFs and offer a separate correction for standard blocks.
+* When a published WS Form has unfinished changes, the connector identifies the affected areas and links to that form in WordPress.
+* A copied site shows both pairs of addresses and lets an administrator confirm the new address with the saved helper choices.
+* Keep whole-design edits available for large WS Form drafts, including their native controls.
+* Stop automatic edits from publishing earlier draft changes. Review pending drafts separately.
+* Show existing integration and Used CSS activity and the assigned item ID for new integration creations.
+* Preserve requested fields when creating WS Form drafts and verify the saved layout and field settings. Pending new-form approvals require a fresh preview.
+
+= 1.13.4 =
+* WS Form design previews say whether the edit will go live. Changing automatic publication requires a fresh preview for published forms.
+* Reactivating a copied installation preserves its saved choices and keeps the connection paused until an administrator reviews and saves the new address.
+* Settings saves verify the stored address and choices before reporting success or adjusting clearing permissions.
+* Fixed UTC offsets work without date-validation warnings. Named timezones retain their daylight-saving checks.
+
+= 1.13.3 =
+* Post and page metadata edits now stop if WordPress would change publication status. A due scheduled item keeps its original title and schedule.
+* Publication and scheduling check every direct link, download button and embedded preview in File blocks that identify a Media Library PDF. A mismatch identifies the affected block so it can be corrected.
 
 = 1.13.2 =
 * Website Connector settings recommend MCP Adapter 0.7.2 or later for working installations on an older compatible version. The advisory shows the active and recommended versions and clears after updating.

@@ -19,16 +19,19 @@ function check( $input, array $keys ): true|\WP_Error {
 }
 
 /** These paths and arguments are selected by typed callbacks inside this module. */
-function request( string $method, string $route, array $params = array() ): array|\WP_Error {
+function request( string $method, string $route, array $params = array(), ?callable $write = null ): array|\WP_Error {
 	$request = new \WP_REST_Request( $method, '/redirection/v1/' . $route );
 	if ( 'GET' === $method ) {
 		$request->set_query_params( $params );
 	} else {
 		$request->set_body_params( $params );
 	}
-	$response = rest_do_request( $request );
-	if ( is_wp_error( $response ) || $response->get_status() >= 400 || ! is_array( $response->get_data() ) ) {
-		return Redirection\error( 'native_admin', 'Redirection refused this operation. Read the current state before retrying.', is_wp_error( $response ) ? 500 : max( 400, $response->get_status() ) );
+	$response = null === $write ? rest_do_request( $request ) : Redirection\guarded_request( $request, $write );
+	if ( is_wp_error( $response ) ) {
+		return $response;
+	}
+	if ( $response->get_status() >= 400 || ! is_array( $response->get_data() ) ) {
+		return Redirection\error( 'native_admin', 'Redirection refused this operation. Read the current state before retrying.', max( 400, $response->get_status() ) );
 	}
 	return $response->get_data();
 }
@@ -89,6 +92,12 @@ function search( $input ): array|\WP_Error {
 		|| ( isset( $input['http_code'] ) && ( ! is_int( $input['http_code'] ) || $input['http_code'] < 300 || $input['http_code'] > 599 ) ) ) {
 		return Redirection\error( 'filter', 'Choose a valid page or supported rule filter.' );
 	}
+	if ( isset( $input['http_code'] ) ) {
+		$validator = new \Red_Item_Sanitize();
+		if ( ! $validator->is_valid_redirect_code( $input['http_code'] ) && ! $validator->is_valid_error_code( $input['http_code'] ) ) {
+			return Redirection\error( 'filter', 'Redirection does not support that HTTP code as a rule filter.' );
+		}
+	}
 	if ( isset( $input['enabled'] ) ) {
 		$filter['status'] = $input['enabled'] ? 'enabled' : 'disabled';
 	}
@@ -115,11 +124,24 @@ function search( $input ): array|\WP_Error {
 	if ( is_wp_error( $result ) ) {
 		return $result;
 	}
+	$items = array_map( __NAMESPACE__ . '\\summarize', $result['items'] );
+	foreach ( $items as $item ) {
+		foreach ( array( 'http_code', 'group_id', 'enabled', 'match_format' ) as $key ) {
+			if ( isset( $input[ $key ] ) && $item[ $key ] !== $input[ $key ] ) {
+				return Redirection\error( 'filter', 'The native search returned a rule outside the requested filters.', 409 );
+			}
+		}
+		foreach ( array( 'source', 'title', 'target' ) as $key ) {
+			if ( isset( $input[ $key ] ) && ( ! is_string( $item[ $key ] ) || ! preg_match( '~' . preg_quote( remove_accents( $input[ $key ] ), '~' ) . '~iu', remove_accents( $item[ $key ] ) ) ) ) {
+				return Redirection\error( 'filter', 'The native search returned a rule whose visible fields do not match the requested text.', 409 );
+			}
+		}
+	}
 	return array(
 		'site_url' => Connector\bound_site(),
 		'page'     => $page,
 		'total'    => (int) $result['total'],
-		'items'    => array_map( __NAMESPACE__ . '\\summarize', $result['items'] ),
+		'items'    => $items,
 	);
 }
 
@@ -368,24 +390,113 @@ function group_plan( string $operation, array $parameters ): array|\WP_Error {
 		return Redirection\error( 'unchanged', 'The group already has the requested status.', 409 );
 	}
 	if ( 'enable_group' === $operation ) {
-		$active = array_filter( $rows, static fn( $row ) => ! empty( $row['enabled'] ) );
-		if ( count( $active ) > MAX_ITEMS ) {
+		// The native group endpoint enables every member, including disabled imports.
+		if ( count( $rows ) > MAX_ITEMS ) {
 			return Redirection\error( 'group_size', 'Use the native editor for groups with more than 25 rules that could become active.', 409 );
 		}
-		$checked = validate_enable( $active );
+		$checked = validate_enable( $rows );
 		if ( is_wp_error( $checked ) ) {
 			return $checked;
+		}
+	}
+	$rules = array_map( __NAMESPACE__ . '\\summarize', $rows );
+	if ( in_array( $operation, array( 'enable_group', 'disable_group' ), true ) ) {
+		foreach ( $rules as $index => $rule ) {
+			$rules[ $index ]['enabled_after'] = $enabled;
 		}
 	}
 	return array(
 		'id'     => $id,
 		'before' => $current['group'] ?? null,
-		'rules'  => array_map( __NAMESPACE__ . '\\summarize', $rows ),
+		'rules'  => $rules,
 		'after'  => 'delete_empty_group' === $operation ? null : array(
 			'name'    => $name,
 			'enabled' => $enabled,
 		),
 	);
+}
+
+/**
+ * Native Redirection stores only source flags that differ from the current defaults.
+ * The REST list already expands them and cannot distinguish inherited and explicit choices.
+ */
+function defaults_impact( array $before, array $after ): array|\WP_Error {
+	global $wpdb;
+	$table = $wpdb->prefix . 'redirection_items';
+	$rows  = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM %i ORDER BY id LIMIT %d', $table, Redirection\MAX_RULES + 1 ), ARRAY_A );
+	if ( ! is_array( $rows ) || $wpdb->last_error || count( $rows ) > Redirection\MAX_RULES ) {
+		return Redirection\error( 'analysis_limit', 'The rules inheriting these defaults could not all be reviewed. Use the native editor.', 409 );
+	}
+	$affected = array();
+	foreach ( $rows as $row ) {
+		$data = empty( $row['match_data'] ) ? array() : json_decode( $row['match_data'], true );
+		if ( ! is_array( $data ) || ( isset( $data['source'] ) && ! is_array( $data['source'] ) ) ) {
+			return Redirection\error( 'settings_input', 'A native rule has unreadable matching settings. Review the defaults in Redirection.', 409 );
+		}
+		// Match Red_Item's loading of the legacy regex column and stored flag overrides.
+		$overrides = isset( $data['source'] ) ? $data['source'] : array( 'flag_regex' => (bool) $row['regex'] );
+		$old       = ( new \Redirection\Url\SourceFlags( array_replace( $before, $overrides ) ) )->get_json();
+		$new       = ( new \Redirection\Url\SourceFlags( array_replace( $after, $overrides ) ) )->get_json();
+		$changes   = array_diff_assoc( $new, $old );
+		if ( ! $changes ) {
+			continue;
+		}
+		if ( count( $affected ) >= MAX_ITEMS ) {
+			return Redirection\error( 'analysis_limit', 'More than 25 existing rules would change their matching behaviour. Review this site-wide change in Redirection.', 409 );
+		}
+		if ( isset( $changes['flag_query'] ) && in_array( 'exactorder', array( $old['flag_query'], $new['flag_query'] ), true ) && ! $row['regex'] ) {
+			$matcher = new \Redirection\Url\Matcher( $row['url'] );
+			$index   = 'exactorder' === $new['flag_query'] ? $matcher->get_url_with_params() : $matcher->get_url();
+			if ( $index !== $row['match_url'] ) {
+				return Redirection\error( 'settings_index', 'The new query default needs an existing rule’s native matching index to be rebuilt. Review that change in Redirection.', 409 );
+			}
+		}
+		$native     = new \Red_Item( (object) $row );
+		$affected[] = array(
+			'id'         => (int) $row['id'],
+			'target'     => Redirection\rule_fields( $native->to_json() )['target'],
+			'group_id'   => (int) $row['group_id'],
+			'source'     => $row['url'],
+			'enabled'    => 'enabled' === $row['status'],
+			'match_type' => $row['match_type'],
+			'regex'      => (bool) $row['regex'],
+			'before'     => array_intersect_key( $old, $changes ),
+			'after'      => $changes,
+			'state_hash' => fingerprint( array_diff_key( $row, array_flip( array( 'last_count', 'last_access' ) ) ) ),
+		);
+	}
+	return $affected;
+}
+
+/** Check the projected live plain rules together, using the same loop/overlap model as a rule edit. */
+function defaults_safety( array $affected ): true|\WP_Error {
+	$changes = array_column( $affected, 'after', 'id' );
+	if ( ! $changes ) {
+		return true;
+	}
+	$rules = Redirection\safety_rules();
+	if ( is_wp_error( $rules ) ) {
+		return $rules;
+	}
+	$flags = array(
+		'flag_case'     => 'ignore_case',
+		'flag_trailing' => 'ignore_trailing_slash',
+		'flag_query'    => 'query_parameters',
+	);
+	foreach ( $rules as $index => $rule ) {
+		foreach ( $changes[ $rule['id'] ] ?? array() as $key => $value ) {
+			$rules[ $index ]['fields'][ $flags[ $key ] ] = $value;
+		}
+	}
+	foreach ( $rules as $rule ) {
+		if ( $rule['active'] && isset( $changes[ $rule['id'] ] ) ) {
+			$safe = Redirection\redirect_safety( $rule['fields'], $rule['id'], $rules );
+			if ( is_wp_error( $safe ) ) {
+				return $safe;
+			}
+		}
+	}
+	return true;
 }
 
 function defaults_plan( array $parameters ): array|\WP_Error {
@@ -407,9 +518,15 @@ function defaults_plan( array $parameters ): array|\WP_Error {
 	if ( $after === $current['fields'] ) {
 		return Redirection\error( 'unchanged', 'The defaults already have these values.', 409 );
 	}
-	return array(
-		'before' => $current['fields'],
-		'after'  => $after,
+	$affected = defaults_impact( $current['fields'], $after );
+	if ( is_wp_error( $affected ) ) {
+		return $affected;
+	}
+	$safe = defaults_safety( $affected );
+	return is_wp_error( $safe ) ? $safe : array(
+		'before'         => $current['fields'],
+		'after'          => $after,
+		'affected_rules' => $affected,
 	);
 }
 
@@ -436,6 +553,9 @@ function export_rules( $input ): array|\WP_Error {
 			return Redirection\error( 'export_rule', 'Use the vendor export for unsupported rules.' );
 		}
 		unset( $fields['group_id'], $fields['position'] );
+		if ( ! empty( $row['match_data']['options']['log_exclude'] ) ) {
+			$fields['log_exclude'] = true;
+		}
 		$rules[ $id ] = $fields;
 	}
 	return array(
@@ -461,27 +581,33 @@ function import_plan( array $parameters ): array|\WP_Error {
 	if ( count( $group['rows'] ) + count( $list ) > 200 ) {
 		return Redirection\error( 'group_size', 'The import would exceed the 200-rule read-back limit for this group.', 409 );
 	}
-	$safety = Redirection\safety_rules();
+	$safety = Redirection\safety_rules( count( $list ) );
 	if ( is_wp_error( $safety ) ) {
 		return $safety;
 	}
-	$fields = array();
+	$fields   = array();
+	$defaults = Redirection\creation_defaults();
 	foreach ( $list as $index => $row ) {
 		if ( ! is_array( $row ) || ! isset( $row['source'], $row['target'] ) || isset( $row['group_id'] ) || isset( $row['position'] ) ) {
 			return Redirection\error( 'import_rules', 'Each imported rule needs a source and target. The destination group is selected separately.' );
 		}
+		$exclude_logging = $row['log_exclude'] ?? false;
+		if ( array_key_exists( 'log_exclude', $row ) && ! is_bool( $row['log_exclude'] ) ) {
+			return Redirection\error( 'import_rules', 'Use a boolean for the rule logging exclusion.' );
+		}
+		unset( $row['log_exclude'] );
 		$base  = array(
-			'group_id'              => $id,
-			'position'              => count( $group['rows'] ) + $index,
-			'title'                 => '',
-			'http_code'             => 301,
-			'ignore_case'           => true,
-			'ignore_trailing_slash' => true,
-			'query_parameters'      => 'exact',
-		);
+			'group_id'  => $id,
+			'position'  => count( $group['rows'] ) + $index,
+			'title'     => '',
+			'http_code' => 301,
+		) + $defaults;
 		$entry = Redirection\normalise( $base, $row );
 		if ( is_wp_error( $entry ) ) {
 			return $entry;
+		}
+		if ( $exclude_logging ) {
+			$entry['log_exclude'] = true;
 		}
 		$fields[] = $entry;
 		$safety[] = array(
@@ -507,17 +633,30 @@ function import_plan( array $parameters ): array|\WP_Error {
 function import_rules( array $plan ): array {
 	$ids = array();
 	foreach ( $plan['rules'] as $index => $fields ) {
-		$found = Redirection\dispatch(
-			'POST',
-			'/redirection/v1/redirect',
-			Redirection\payload( $fields ) + array( 'status' => 'disabled' )
+		$exclude_logging = ! empty( $fields['log_exclude'] );
+		unset( $fields['log_exclude'] );
+		$payload = Redirection\payload( $fields ) + array( 'status' => 'disabled' );
+		if ( $exclude_logging ) {
+			$payload['match_data']['options'] = array( 'log_exclude' => true );
+		}
+		$group              = $plan['group'];
+		$group['redirects'] = (int) $group['redirects'] + $index;
+		$review             = array(
+			'operation'   => 'create',
+			'id'          => 0,
+			'group_hash'  => fingerprint( $group ),
+			'fields'      => $fields,
+			'enabled'     => false,
+			'log_exclude' => $exclude_logging,
 		);
-		$rows  = is_wp_error( $found ) ? $found : group_rules( $plan['id'] );
+		$found              = Redirection\dispatch( 'POST', '/redirection/v1/redirect', $payload, $review );
+		$rows               = is_wp_error( $found ) ? $found : group_rules( $plan['id'] );
 		if ( ! is_wp_error( $rows ) ) {
 			$match = array_values(
 				array_filter(
 					$rows,
 					static fn( $row ) => empty( $row['enabled'] ) && Redirection\rule_fields( $row ) === $fields
+						&& ! empty( $row['match_data']['options']['log_exclude'] ) === $exclude_logging
 				)
 			);
 			if ( 1 === count( $match ) ) {
@@ -563,7 +702,7 @@ function plan( string $operation, array $parameters ): array|\WP_Error {
 	};
 }
 
-function preview( $input ): array|\WP_Error {
+function preview( $input, ?array $replaces = null ): array|\WP_Error {
 	$checked = check( $input, array( 'operation', 'id', 'state_hash', 'name', 'selection', 'changes', 'rules' ) );
 	if ( is_wp_error( $checked ) ) {
 		return $checked;
@@ -583,38 +722,191 @@ function preview( $input ): array|\WP_Error {
 	if ( is_wp_error( $plan ) ) {
 		return $plan;
 	}
-	$saved = Redirection\save_preview(
+	$saved   = Redirection\save_preview(
 		array(
 			'operation'      => $operation,
 			'id'             => $plan['id'] ?? 0,
 			'parameters'     => $parameters,
 			'review'         => fingerprint( $plan ),
 			'changed_fields' => array_keys( $parameters ),
-		)
+		),
+		$replaces
 	);
+	$message = match ( $operation ) {
+		'update_redirect_defaults' => 'These defaults also change matching for the listed existing rules. Review each rule’s current and proposed settings before confirming.',
+		'enable_group'  => 'Enabling this group activates every listed rule, including rules previously disabled individually. Review each proposed rule state before confirming.',
+		'disable_group' => 'Disabling this group disables every listed rule. Enabling this group later will activate every rule present at that time.',
+		default         => 'Review the exact scope and effect. Permanent removal also requires explicit confirmation of removal.',
+	};
 	return is_wp_error( $saved ) ? $saved : array(
 		'site_url'  => Connector\bound_site(),
 		'operation' => $operation,
 		'change'    => $plan,
-		'message'   => 'Review the exact scope and effect. Permanent removal also requires explicit confirmation of removal.',
+		'message'   => $message,
 	) + $saved;
 }
 
-function verify_bulk( string $operation, array $ids ): array|\WP_Error {
+function verify_bulk( string $operation, array $plan ): array|\WP_Error {
 	$items = array();
-	foreach ( $ids as $id ) {
-		$row = Redirection\native_read( $id );
+	foreach ( $plan['before'] as $rule ) {
+		$row = Redirection\native_read( $rule['id'] );
 		if ( 'bulk_delete' === $operation && is_wp_error( $row ) && 'church_connector_redirect_missing' === $row->get_error_code() ) {
 			continue;
 		}
 		if ( 'bulk_delete' === $operation || is_wp_error( $row ) || ( 'bulk_enable' === $operation ) !== ! empty( $row['enabled'] ) ) {
 			return Redirection\error( 'admin_verify', 'The batch could not be verified completely. Read every selected rule before retrying.', 409 );
 		}
-		$items[] = summarize( $row );
+		$items[]        = summarize( $row );
+		$row['enabled'] = $rule['enabled'];
+		if ( ! hash_equals( $rule['state_hash'], summarize( $row )['state_hash'] ) ) {
+			return Redirection\error( 'admin_verify', 'A rule changed beyond its approved status. Inspect the selection before retrying.', 409 );
+		}
 	}
 	return array(
-		'ids'   => $ids,
+		'ids'   => $plan['ids'],
 		'items' => $items,
+	);
+}
+
+/** Compare all reviewed rule configuration, allowing only the proposed status change. */
+function group_members_match( array $plan, array $rows, bool $after ): bool {
+	if ( count( $plan['rules'] ) !== count( $rows ) ) {
+		return false;
+	}
+	foreach ( $rows as $index => $row ) {
+		$review = $plan['rules'][ $index ];
+		if ( $after ) {
+			if ( $review['enabled_after'] !== $row['enabled'] ) {
+				return false;
+			}
+			$row['enabled'] = $review['enabled'];
+		}
+		if ( ! hash_equals( $review['state_hash'], fingerprint( Redirection\configuration( $row ) ) ) ) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/** Keep the native group-wide write and the membership review in one transaction. */
+function locked_group_action( array $plan, callable $callback, \WP_REST_Request $request ) {
+	global $wpdb;
+	$id     = $plan['id'];
+	$groups = $wpdb->prefix . 'redirection_groups';
+	$items  = $wpdb->prefix . 'redirection_items';
+	$failed = Redirection\error( 'group_atomic', 'The database could not protect the reviewed group change. Read the group before retrying or use the native editor.', 409 );
+	return Redirection\rule_transaction(
+		static function () use ( $plan, $callback, $request, $id, $groups, $items, $failed, $wpdb ) {
+			if ( 1 !== $wpdb->query( $wpdb->prepare( 'SELECT id FROM %i WHERE id = %d FOR UPDATE', $groups, $id ) )
+				|| false === $wpdb->query( $wpdb->prepare( 'SELECT id FROM %i WHERE group_id = %d FOR UPDATE', $items, $id ) ) ) {
+				return $failed;
+			}
+			$current = group_state( $id );
+			if ( is_wp_error( $current ) ) {
+				return $current;
+			}
+			if ( $current['group'] !== $plan['before'] || ! group_members_match( $plan, $current['rows'], false ) ) {
+				return Redirection\error( 'stale', 'The group or its rules changed during the save. Review the group again.', 409 );
+			}
+			if ( true === ( $plan['after']['enabled'] ?? false ) ) {
+				$valid = validate_enable( $current['rows'] );
+				if ( is_wp_error( $valid ) ) {
+					return $valid;
+				}
+			}
+			$response = $callback( $request );
+			if ( is_wp_error( $response ) || ( $response instanceof \WP_HTTP_Response && $response->get_status() >= 400 ) ) {
+				return $response;
+			}
+			if ( null === $plan['after'] ) {
+				if ( '0' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE id = %d', $groups, $id ) ) ) {
+					return $failed;
+				}
+			} else {
+				$current  = group_state( $id );
+				$expected = array_replace( $plan['before'], $plan['after'] );
+				if ( is_wp_error( $current ) || $expected !== $current['group'] || ! group_members_match( $plan, $current['rows'], true ) ) {
+					return $failed;
+				}
+			}
+			return $response;
+		}
+	);
+}
+
+function locked_bulk_action( string $operation, array $plan, callable $callback, \WP_REST_Request $request ) {
+	return Redirection\rule_transaction(
+		static function () use ( $operation, $plan, $callback, $request ) {
+			global $wpdb;
+			$selection = array();
+			foreach ( $plan['before'] as $rule ) {
+				if ( 1 !== $wpdb->query( $wpdb->prepare( 'SELECT id FROM %i WHERE id = %d FOR UPDATE', $wpdb->prefix . 'redirection_items', $rule['id'] ) ) ) {
+					return Redirection\error( 'stale', 'A selected rule changed during the save. Review the selection again.', 409 );
+				}
+				$selection[] = array_intersect_key( $rule, array_flip( array( 'id', 'state_hash' ) ) );
+			}
+			$current = bulk_plan( $operation, array( 'selection' => $selection ) );
+			if ( is_wp_error( $current ) ) {
+				return $current;
+			}
+			if ( $current !== $plan ) {
+				return Redirection\error( 'stale', 'A selected rule or its group changed during the save. Review the selection again.', 409 );
+			}
+			$response = $callback( $request );
+			if ( is_wp_error( $response ) || ( $response instanceof \WP_HTTP_Response && $response->get_status() >= 400 ) ) {
+				return $response;
+			}
+			$verified = verify_bulk( $operation, $plan );
+			if ( is_wp_error( $verified ) ) {
+				return $verified;
+			}
+			if ( 'bulk_enable' === $operation ) {
+				$projected = Redirection\safety_rules();
+				if ( is_wp_error( $projected ) ) {
+					return $projected;
+				}
+				foreach ( $projected as $rule ) {
+					if ( in_array( $rule['id'], $plan['ids'], true ) ) {
+						$safe = Redirection\redirect_safety( $rule['fields'], $rule['id'], $projected );
+						if ( is_wp_error( $safe ) ) {
+							return $safe;
+						}
+					}
+				}
+			}
+			return $response;
+		}
+	);
+}
+
+function locked_defaults_action( array $plan, callable $callback, \WP_REST_Request $request ) {
+	return Redirection\rule_transaction(
+		static function () use ( $plan, $callback, $request ) {
+			$ids = Redirection\locked_rule_ids();
+			if ( is_wp_error( $ids ) ) {
+				return $ids;
+			}
+			$state    = defaults_state();
+			$affected = defaults_impact( $plan['before'], $plan['after'] );
+			if ( is_wp_error( $state ) || $state['fields'] !== $plan['before'] || $affected !== $plan['affected_rules'] ) {
+				return Redirection\error( 'stale', 'The matching defaults or the rules inheriting them changed. Review the affected rules again.', 409 );
+			}
+			$safe = defaults_safety( $affected );
+			if ( is_wp_error( $safe ) ) {
+				return $safe;
+			}
+			$original = \Red_Options::get();
+			$response = $callback( $request );
+			if ( is_wp_error( $response ) || ( $response instanceof \WP_HTTP_Response && $response->get_status() >= 400 ) ) {
+				return $response;
+			}
+			Redirection\reset_native_options();
+			$stored = \Red_Options::get();
+			if ( array_replace( $original, $plan['after'] ) !== $stored || defaults_impact( $plan['before'], $plan['after'] ) !== $affected ) {
+				return Redirection\error( 'admin_verify', 'The native defaults or affected rules differed from the review. The change was rolled back.', 409 );
+			}
+			return $response;
+		}
 	);
 }
 
@@ -629,12 +921,18 @@ function commit( string $operation, array $plan ): array|\WP_Error {
 			array(
 				'items'  => $plan['ids'],
 				'global' => false,
-			)
+			),
+			static fn( $callback, $target ) => locked_bulk_action( $operation, $plan, $callback, $target )
 		);
-		return is_wp_error( $result ) ? $result : verify_bulk( $operation, $plan['ids'] );
+		return is_wp_error( $result ) ? $result : verify_bulk( $operation, $plan );
 	}
 	if ( 'update_redirect_defaults' === $operation ) {
-		$result = request( 'POST', 'setting', $plan['after'] );
+		$result = request(
+			'POST',
+			'setting',
+			$plan['after'],
+			static fn( $callback, $target ) => locked_defaults_action( $plan, $callback, $target )
+		);
 		if ( is_wp_error( $result ) ) {
 			return $result;
 		}
@@ -669,7 +967,8 @@ function commit( string $operation, array $plan ): array|\WP_Error {
 			array(
 				'items'  => array( $id ),
 				'global' => false,
-			)
+			),
+			static fn( $callback, $target ) => locked_group_action( $plan, $callback, $target )
 		);
 	}
 	if ( is_wp_error( $result ) ) {
@@ -693,10 +992,46 @@ function commit( string $operation, array $plan ): array|\WP_Error {
 	if ( is_wp_error( $group ) || $plan['after']['name'] !== $group['name'] || $plan['after']['enabled'] !== $group['enabled'] ) {
 		return $error;
 	}
-	return array(
+	$verified = array(
 		'id'    => $id,
 		'group' => Redirection\group_configuration( $group ),
 	);
+	if ( in_array( $operation, array( 'enable_group', 'disable_group' ), true ) ) {
+		$rows = group_rules( $id );
+		if ( is_wp_error( $rows ) ) {
+			return $rows;
+		}
+		$members = array_map( __NAMESPACE__ . '\\summarize', $rows );
+		if ( ! group_members_match( $plan, $rows, true ) ) {
+			return Redirection\error( 'admin_verify', 'Redirection changed the group but its rule states differ from the preview. Inspect the group before retrying.', 409 );
+		}
+		$verified['rules'] = $members;
+	}
+	return $verified;
+}
+
+function refresh_admin_review( array $saved, \WP_Error $error ): \WP_Error {
+	$parameters = $saved['parameters'];
+	if ( isset( $parameters['selection'] ) ) {
+		foreach ( $parameters['selection'] as $index => $item ) {
+			$row = Redirection\native_read( $item['id'] );
+			if ( is_wp_error( $row ) ) {
+				return $row;
+			}
+			$parameters['selection'][ $index ]['state_hash'] = summarize( $row )['state_hash'];
+		}
+	} elseif ( isset( $parameters['state_hash'] ) ) {
+		$current = 'update_redirect_defaults' === $saved['operation'] ? defaults_state() : group_state( $parameters['id'] );
+		if ( is_wp_error( $current ) ) {
+			return $current;
+		}
+		$parameters['state_hash'] = $current['state_hash'];
+	}
+	$request = array(
+		'site_url'  => Connector\bound_site(),
+		'operation' => $saved['operation'],
+	) + $parameters;
+	return \ChurchWebsiteConnector\RestTools\refreshed_error( $error, preview( $request, $saved ), $saved, Redirection\PREFIX, Redirection\EXPIRE_HOOK );
 }
 
 function apply( $input ): array|\WP_Error {
@@ -725,10 +1060,13 @@ function apply( $input ): array|\WP_Error {
 	try {
 		$plan = plan( $operation, $saved['parameters'] );
 		if ( is_wp_error( $plan ) ) {
-			return $plan;
+			return 'church_connector_redirect_stale' === $plan->get_error_code() ? refresh_admin_review( $saved, $plan ) : $plan;
 		}
-		if ( ! hash_equals( $saved['review'], fingerprint( $plan ) ) || ! Redirection\consume( $saved ) ) {
-			return Redirection\error( 'stale', 'The reviewed state changed or the preview was replaced.', 409 );
+		if ( ! hash_equals( $saved['review'], fingerprint( $plan ) ) ) {
+			return refresh_admin_review( $saved, Redirection\error( 'stale', 'The reviewed state changed.', 409 ) );
+		}
+		if ( ! Redirection\consume( $saved ) ) {
+			return Redirection\error( 'token', 'The preview was replaced or already claimed.', 409 );
 		}
 		$result = commit( $operation, $plan );
 		foreach ( $plan['ids'] ?? ( is_array( $result ) && ! empty( $result['ids'] ) ? $result['ids'] : array( is_array( $result ) ? ( $result['id'] ?? $saved['id'] ) : $saved['id'] ) ) as $id ) {

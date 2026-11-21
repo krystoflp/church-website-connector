@@ -17,12 +17,13 @@ function allow_rocket_discovery( $wp ) {
 	if ( ! defined( 'WP_ROCKET_VERSION' ) || ! class_exists( '\GeneratePress_AI_OAuth' ) ) {
 		return;
 	}
-	$path = wp_parse_url( wp_unslash( $_SERVER['REQUEST_URI'] ?? '' ), PHP_URL_PATH );
+	$path      = wp_parse_url( wp_unslash( $_SERVER['REQUEST_URI'] ?? '' ), PHP_URL_PATH );
+	$root      = rtrim( (string) wp_parse_url( \ChurchWebsiteConnector\bound_site(), PHP_URL_PATH ), '/' );
 	$documents = array(
-		'/.well-known/oauth-protected-resource' => 'protected-resource',
-		'/.well-known/oauth-protected-resource/' => 'protected-resource',
-		'/.well-known/oauth-authorization-server' => 'authorization-server',
-		'/.well-known/oauth-authorization-server/' => 'authorization-server',
+		$root . '/.well-known/oauth-protected-resource'    => 'protected-resource',
+		$root . '/.well-known/oauth-protected-resource/'   => 'protected-resource',
+		$root . '/.well-known/oauth-authorization-server'  => 'authorization-server',
+		$root . '/.well-known/oauth-authorization-server/' => 'authorization-server',
 	);
 	if ( ! is_string( $path ) || ! isset( $documents[ $path ] ) ) {
 		return;

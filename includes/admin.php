@@ -264,25 +264,79 @@ function register_category(): void {
 	}
 }
 
+/** A shortcut is available only for a recognised active configuration on a genuine move. */
+function rebind_action( array $saved, array $current ): string {
+	$previous = array_intersect_key( $saved, $current );
+	if ( 1 !== ( $saved['schema'] ?? null ) || true !== ( $saved['enabled'] ?? false ) || is_multisite()
+		|| ! is_string( $previous['home'] ?? null ) || ! is_string( $previous['wordpress'] ?? null )
+		|| ! valid_identity( $previous ) || ! valid_identity( $current )
+		|| ( settings_match( $saved, $current ) && reviewed_identity( $saved ) === $current && empty( $saved['grant_cleanup_pending'] ) ) ) {
+		return '';
+	}
+	return 'church_connector_rebind_' . hash( 'sha256', maybe_serialize( array( $saved, $current ) ) );
+}
+
+function render_rebind( array $saved ): void {
+	$current = current_identity();
+	$action  = rebind_action( $saved, $current );
+	if ( '' === $action ) {
+		return;
+	}
+	echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
+	echo '<table class="widefat striped" style="overflow-wrap:anywhere"><caption>Review this website’s addresses</caption><thead><tr><th scope="col">Address</th><th scope="col">Previously saved</th><th scope="col">This installation</th></tr></thead><tbody>';
+	$previous = reviewed_identity( $saved );
+	if ( ! $previous ) {
+		echo '<tr><td colspan="3">This older configuration has no verified record of the original addresses. Review this installation before resuming the saved helpers.</td></tr>';
+	}
+	$labels = array(
+		'home'      => 'Site Address',
+		'wordpress' => 'WordPress Address',
+	);
+	foreach ( $labels as $key => $label ) {
+		echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( $previous[ $key ] ?? $saved[ $key ] ) . '</td><td>' . esc_html( $current[ $key ] ) . '</td></tr>';
+	}
+	echo '</tbody></table><p>Confirming resumes the saved helpers here. Previous Used CSS grants are cleared and the current eligible administrator can regain access.</p>';
+	wp_nonce_field( $action, 'church_connector_rebind_nonce' );
+	echo '<input type="hidden" name="action" value="church_connector_save"><input type="hidden" name="confirm_saved" value="1">';
+	submit_button( 'Confirm this address and keep my settings', 'primary' );
+	echo '</form>';
+}
+
 function admin_save(): void {
 	if ( ! current_user_can( 'manage_options' ) ) {
 		wp_die( 'An administrator must change connection settings.', '', array( 'response' => 403 ) );
 	}
-	check_admin_referer( 'church_connector_save' );
-	$flags = array(
-		'enabled'       => true,
-		'setup_pending' => false,
-	);
-	foreach ( array( 'compatibility', 'codex', 'used_css', 'rest_tools', 'redirection_tools', 'generatepress_bridge', 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools', 'imagify_pdf_protection' ) as $key ) {
-		$flags[ $key ] = isset( $_POST[ $key ] ) && '1' === $_POST[ $key ];
+	$stored = get_option( SETTINGS, null );
+	$review = settings_review_action( $stored, current_identity() );
+	if ( isset( $_POST['confirm_saved'] ) ) {
+		$flags  = is_array( $stored ) ? $stored : array();
+		$action = rebind_action( $flags, current_identity() );
+		if ( '' === $action ) {
+			wp_die( 'Reload Website Connector settings to review the current address.', '', array( 'response' => 409 ) );
+		}
+		check_admin_referer( $action, 'church_connector_rebind_nonce' );
+	} else {
+		$submitted_review = isset( $_POST['church_connector_review'] ) && is_string( $_POST['church_connector_review'] ) ? sanitize_text_field( wp_unslash( $_POST['church_connector_review'] ) ) : $review;
+		if ( ! preg_match( '/\Achurch_connector_save_[a-f0-9]{64}\z/', $submitted_review ) ) {
+			wp_die( 'Reload Website Connector settings to review the current choices.', '', array( 'response' => 403 ) );
+		}
+		check_admin_referer( $submitted_review );
+		$review = $submitted_review;
+		$flags  = array(
+			'enabled'       => true,
+			'setup_pending' => false,
+		);
+		foreach ( array( 'compatibility', 'codex', 'used_css', 'rest_tools', 'redirection_tools', 'generatepress_bridge', 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools', 'imagify_pdf_protection' ) as $key ) {
+			$flags[ $key ] = isset( $_POST[ $key ] ) && '1' === $_POST[ $key ];
+		}
 	}
-	$result = configure( $flags );
+	$result = configure( $flags, $review );
 	if ( is_wp_error( $result ) ) {
 		wp_die(
 			esc_html( $result->get_error_message() ),
 			'Website Connector',
 			array(
-				'response'  => 400,
+				'response'  => $result->get_error_data()['status'] ?? 400,
 				'back_link' => true,
 			)
 		);
@@ -301,7 +355,9 @@ function admin_page(): void {
 		wp_die( 'An administrator must open this page.', '', array( 'response' => 403 ) );
 	}
 	$status          = connection_status();
-	$saved           = settings();
+	$stored          = get_option( SETTINGS, null );
+	$saved           = is_array( $stored ) ? $stored : array();
+	$review_identity = current_identity();
 	$deps            = $status['dependencies'];
 	$bridge_selected = 'generatepress' === $status['primary_connection']['selected'];
 	$bridge_ready    = $status['primary_connection']['bridge_ready'];
@@ -316,17 +372,18 @@ function admin_page(): void {
 	Maintenance\render_summary( $status );
 	echo '<p>Connect your assistant to this website using the setup selected below. Reuse an existing connection for this website where available; a new connection needs native website sign-in and your consent.</p>';
 	echo '<p><strong>Plugin version:</strong> ' . esc_html( VERSION ) . '</p>';
-	echo '<p><strong>Website:</strong> ' . esc_html( $status['current_site_url'] ) . '</p>';
+	echo '<p><strong>Site Address:</strong> ' . esc_html( $review_identity['home'] ) . '<br><strong>WordPress Address:</strong> ' . esc_html( $review_identity['wordpress'] ) . '</p>';
 	if ( isset( $_GET['saved'] ) && '1' === $_GET['saved'] ) {
 		echo '<div class="notice notice-success"><p>Website settings saved.</p></div>';
 	}
 	if ( ! $status['enabled_on_current_site'] ) {
 		echo '<div class="notice notice-warning"><p>The helpers are paused or this website address has changed. Review the settings below and save to enable them on this website.</p></div>';
+		render_rebind( $saved );
 	}
 	if ( $status['used_css']['legacy_helpers_active'] ) {
 		echo '<div class="notice notice-warning"><p>An older Used CSS helper is active. Its existing tools remain available. This plugin waits before adding its replacement clearing tools. Keep an administrator browser session open while deactivating the old helper, then save these settings to grant your replacement clearing permission. Do not delete the old helper until the replacement is verified.</p></div>';
 	}
-	if ( ! empty( $saved['setup_pending'] ) ) {
+	if ( $status['enabled_on_current_site'] && ! empty( $saved['setup_pending'] ) ) {
 		echo '<div class="notice notice-info"><p>' . esc_html__( 'Initial setup uses the saved settings shown below. The saved connection choices already apply; save only when you change an option. Finish any missing plugin or licence setup, and review existing authorised GeneratePress clients. Optional helpers wait when their plugin is unavailable.', 'church-website-connector' ) . '</p></div>';
 	}
 	if ( $mcp_disabled ) {
@@ -345,7 +402,9 @@ function admin_page(): void {
 	echo '</section><section aria-labelledby="cwc-settings-title"><h2 id="cwc-settings-title">Settings</h2>';
 	Defaults\render();
 	echo '<form id="cwc-settings-form" method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
-	wp_nonce_field( 'church_connector_save' );
+	$review = settings_review_action( $stored, $review_identity );
+	wp_nonce_field( $review );
+	echo '<input type="hidden" name="church_connector_review" value="' . esc_attr( $review ) . '">';
 	echo '<input type="hidden" name="action" value="church_connector_save"><fieldset><legend class="screen-reader-text">Website settings and PDF protection</legend>';
 	$options = array(
 		'compatibility'        => 'Keep GeneratePress and WP Rocket sign-in discovery compatible',

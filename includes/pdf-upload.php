@@ -66,13 +66,16 @@ function upload( $input ) {
         }
         $params[ $field ] = $field === 'title' ? sanitize_text_field( $input[ $field ] ) : sanitize_textarea_field( $input[ $field ] );
     }
-    if ( array_key_exists( 'attach_to', $input ) ) {
-        $parent = $input['attach_to'];
-        if ( ! is_int( $parent ) || $parent < 1 || ! get_post( $parent ) || in_array( get_post_type( $parent ), [ 'attachment', 'revision' ], true ) || ! current_user_can( 'edit_post', $parent ) ) {
-            return error( 'parent', 'Choose an existing post or page your account can edit.', 403 );
-        }
-        $params['post'] = $parent;
-    }
+	if ( array_key_exists( 'attach_to', $input ) ) {
+		$parent = $input['attach_to'];
+		$post   = is_int( $parent ) && $parent > 0 ? get_post( $parent ) : null;
+		$status = $post ? get_post_status_object( $post->post_status ) : null;
+		if ( ! $post || ! in_array( $post->post_type, array( 'post', 'page' ), true ) || ! $status || $status->internal
+			|| ! current_user_can( 'edit_post', $parent ) ) {
+			return error( 'parent', 'Choose an editable post or page outside Trash with a saved editorial status.', 403 );
+		}
+		$params['post'] = $parent;
+	}
     if ( ! function_exists( 'rest_do_request' ) || ! class_exists( '\WP_REST_Request' ) ) {
         return error( 'unavailable', 'The WordPress REST dispatcher is unavailable.', 503 );
     }
@@ -103,7 +106,7 @@ function register_ability(): void {
     if ( ! function_exists( 'wp_register_ability' ) || ! \ChurchWebsiteConnector\feature_enabled( 'rest_tools' ) ) { return; }
     wp_register_ability( 'church-connector/upload-pdf', [
         'label' => 'Upload a PDF document',
-        'description' => 'WRITE: uploads an actual local PDF into the WordPress Media Library through existing MCP sign-in and native REST upload permissions. Read and base64-encode the file; never invent file bytes or pass a filesystem path. Maximum 10 MiB decoded (website/client limits may be lower). Checks PDF signature/end marker and verifies stored bytes. Optional plain-text metadata and attachment to an editable post/page. Returns attachment_id, public URL, byte count and SHA-256. Uploads are public and non-idempotent: inspect the Media Library before retrying an uncertain result. Does not publish pages, change grants or clear caches.',
+		'description'         => 'WRITE: uploads an actual local PDF into the WordPress Media Library through existing MCP sign-in and native REST upload permissions. Read and base64-encode the file; never invent file bytes or pass a filesystem path. Maximum 10 MiB decoded (website/client limits may be lower). Checks PDF signature/end marker and verifies stored bytes. Optional plain-text metadata and attachment to an editable post/page outside Trash with a saved editorial status. Returns attachment_id, public URL, byte count and SHA-256. Uploads are public and non-idempotent: inspect the Media Library before retrying an uncertain result. Does not publish pages, change grants or clear caches.',
         'category' => 'church-connector',
         'input_schema' => [ 'type' => 'object', 'properties' => [
             'site_url' => [ 'type' => 'string', 'enum' => [ \ChurchWebsiteConnector\bound_site() ] ],

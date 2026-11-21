@@ -51,7 +51,10 @@ function describe( \WP_Post $element ): array {
 				$rules[] = $rule;
 			} elseif ( is_array( $rule ) && is_string( $rule['rule'] ?? null ) ) {
 				$id_value = $rule['object'] ?? '';
-				$item     = array(
+				if ( ! is_scalar( $id_value ) || array_diff( array_keys( $rule ), array( 'rule', 'object' ) ) ) {
+					$result['partial_rules'] = true;
+				}
+				$item = array(
 					'rule'   => $rule['rule'],
 					'object' => is_scalar( $id_value ) ? (string) $id_value : '',
 				);
@@ -66,7 +69,7 @@ function describe( \WP_Post $element ): array {
 			}
 		}
 		$result[ $group ] = $rules;
-		if ( is_array( $value ) && ( count( $value ) > count( $rules ) ) ) {
+		if ( is_array( $value ) ? count( $value ) > count( $rules ) : '' !== $value ) {
 			$result['partial_rules'] = true;
 		}
 	}

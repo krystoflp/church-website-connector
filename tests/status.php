@@ -6,7 +6,7 @@ namespace ChurchWebsiteConnector {
  function feature_enabled($flag){return is_bound()&&true===($GLOBALS['flags'][$flag]??false);}
 }
 namespace ChurchWebsiteConnector\GeneratePressBridge {
- function environment_ready(){return $GLOBALS['provider_ready'];}
+ function connection_ready(){return $GLOBALS['provider_ready'] && $GLOBALS['adapter']['compatible'];}
  function supported_version($v){return version_compare($v,'1.0.0','>=')&&version_compare($v,'1.1.0','<');}
 }
 namespace ChurchWebsiteConnector\AdapterSetup {
@@ -42,11 +42,17 @@ $base=['dependencies'=>['wordpress_abilities'=>true,'generatepress_ai_version'=>
  'used_css'=>['enabled'=>true,'ready'=>true,'current_user_can_clear'=>true,'legacy_helpers_active'=>[],'message'=>'Ready'],
  'integrations'=>[['integration'=>'ws-form','label'=>'WS Form Pro','enabled'=>true,'compatible'=>true,'installed_version'=>'1.12.20','supported_versions'=>'>=1.12.20 <1.13']]];
 check(count(array_filter(S\rows($base),fn($r)=>$r['level']!=='green'))===0,'All ready requirements and helpers are green');
-foreach(['wordpress_abilities','generatepress_ai_version','generatepress_license_cached_active','generateblocks_version','wp_rocket_version','wp_rocket_oauth'] as $key){$s=$base;$s['dependencies'][$key]=null;check(count(array_filter(S\rows($s),fn($r)=>$r['level']==='red'))>0,'A missing required dependency is red: '.$key);}
+foreach(['wordpress_abilities','generatepress_ai_version','generatepress_license_cached_active','generateblocks_version'] as $key){$s=$base;$s['dependencies'][$key]=null;check(count(array_filter(S\rows($s),fn($r)=>$r['level']==='red'))>0,'A missing required dependency is red: '.$key);}
 $s=$base;$s['integrations'][0]['installed_version']=null;$s['integrations'][0]['compatible']=false;check(S\rows($s)['ws-form']['level']==='yellow','Enabled optional helper without its plugin is yellow');
 $s['integrations'][0]['enabled']=false;check(S\rows($s)['ws-form']['level']==='green'&&S\rows($s)['ws-form']['off'],'An intentional optional off choice is accurately labelled');
 $s=$base;$s['integrations'][0]['compatible']=false;check(S\rows($s)['ws-form']['level']==='red','Unsupported installed optional integration is an important issue');
 foreach(['imagify_inactive'=>'yellow','overridden'=>'red','hook_unavailable'=>'red','binding_paused'=>'red','protected'=>'green','disabled'=>'green'] as $state=>$level){$s=$base;$s['imagify_pdf_protection']['state']=$state;check(S\rows($s)['pdf_protection']['level']===$level,'PDF protection status has the correct light for '.$state);}
+$optional = $base;
+$optional['dependencies']['wp_rocket_version'] = null;
+$optional['dependencies']['wp_rocket_oauth'] = false;
+check(S\rows($optional)['rocket']['level']==='yellow' && S\rows($optional)['rocket_connection']['level']==='yellow','An intentionally absent alternative provider does not become a serious GeneratePress problem');
+$optional['primary_connection']['selected'] = 'separate_connections';
+check(S\rows($optional)['rocket']['level']==='red' && S\rows($optional)['rocket_connection']['level']==='red','A missing WP Rocket dependency remains serious when its route is selected');
 $s=$base;$s['redirection']['plugin_version']=null;$s['redirection']['compatible']=false;check(S\rows($s)['redirection']['level']==='yellow','Missing optional Redirection is yellow');
 $adapter['compatible']=false;check(S\rows($base)['adapter']['level']==='red','Missing or incompatible required adapter is red');$adapter['compatible']=true;
 $s=$base;$s['pdf_upload']['current_user_can_upload']=false;check(S\rows($s)['uploads']['level']==='red','Missing upload permission is an important issue');

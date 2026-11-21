@@ -93,7 +93,7 @@ function primary_connection(): array {
 	$selected = true === ( Connector\settings()['generatepress_bridge'] ?? false );
 	$codex    = true === ( Connector\settings()['codex'] ?? false );
 	$bound    = Connector\is_bound();
-	$ready    = Connector\feature_enabled( 'generatepress_bridge' ) && Connector\GeneratePressBridge\environment_ready();
+	$ready    = Connector\feature_enabled( 'generatepress_bridge' ) && Connector\GeneratePressBridge\connection_ready();
 	$rocket   = Connector\feature_enabled( 'codex' ) && defined( 'WP_ROCKET_VERSION' ) && class_exists( '\\WPMedia\\MCP\\OAuth\\Bootstrap' ) && Connector\AdapterSetup\status()['compatible'];
 	$mode     = $selected ? 'generatepress' : ( $codex ? 'separate_connections' : 'none' );
 	if ( $selected ) {
@@ -350,12 +350,13 @@ function recent_changes() {
 	$rows       = array();
 	foreach ( $sources as $option => $label ) {
 		foreach ( array_slice( (array) get_option( $option, array() ), 0, 50 ) as $row ) {
-			if ( ! is_array( $row ) || ! is_string( $row['time_utc'] ?? null ) || 1 !== preg_match( '/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\z/', $row['time_utc'] ) ) {
+			if ( ! is_array( $row ) || ! is_string( $row['time_utc'] ?? null ) || 1 !== preg_match( '/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|\+00:00)\z/', $row['time_utc'] ) ) {
 				continue;
 			}
 			$timestamp = strtotime( $row['time_utc'] );
-			if ( false === $timestamp ) {
-				continue; }
+			if ( false === $timestamp || gmdate( 'Y-m-d\TH:i:s', $timestamp ) !== substr( $row['time_utc'], 0, 19 ) ) {
+				continue;
+			}
 			$operation = in_array( $row['operation'] ?? '', $operations, true ) ? $row['operation'] : ( 'Used CSS' === $label ? 'clear' : 'update' );
 			$result    = $row['result'] ?? $row['status'] ?? '';
 			$labels    = array(
@@ -380,7 +381,7 @@ function recent_changes() {
 				'user_id'   => max( 0, (int) ( $row['user_id'] ?? 0 ) ),
 				'source'    => $source,
 				'operation' => $operation,
-				'item_id'   => max( 0, (int) ( $row['id'] ?? 0 ) ),
+				'item_id'   => max( 0, (int) ( $row['id'] ?? ( 'Used CSS' === $label ? ( $row['post_id'] ?? 0 ) : 0 ) ) ),
 				'result'    => in_array( $result, $results, true ) ? $result : 'unknown',
 			);
 		}

@@ -3,13 +3,12 @@ declare(strict_types=1);
 
 defined( 'WP_UNINSTALL_PLUGIN' ) || exit;
 
-foreach ( (array) get_option( 'church_connector_used_css_grantee', array() ) as $user_id ) {
-	$user = get_user_by( 'id', (int) $user_id );
-	if ( $user ) {
-		$user->remove_cap( 'church_connector_clear_used_css' );
-	}
+require_once __DIR__ . '/includes/used-css.php';
+$revoked = \ChurchWebsiteConnector\UsedCss\revoke_grants();
+if ( is_wp_error( $revoked ) ) {
+	wp_die( esc_html( $revoked->get_error_message() ), '', array( 'response' => 500 ) );
 }
-foreach ( array( 'church_website_connector_settings', 'church_connector_used_css_grantee', 'church_connector_used_css_log', 'church_connector_used_css_lock', 'church_connector_used_css_last_clear' ) as $option ) {
+foreach ( array( 'church_website_connector_settings', 'church_connector_used_css_log', 'church_connector_used_css_lock', 'church_connector_used_css_last_clear' ) as $option ) {
 	delete_option( $option );
 }
 

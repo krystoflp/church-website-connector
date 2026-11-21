@@ -64,8 +64,10 @@ def main():
         blueprint = json.loads(template.replace('__CONNECTOR_VERSION__', version)
                                .replace('__CONNECTOR_ZIP_SHA256__', digest))
         blueprint['preferredVersions'] = {'wp': wp, 'php': '8.3'}
-        for name in ['styled-overlay.php', 'maintenance-integration.php', 'updates-integration.php']:
+        for name in ['styled-overlay.php', 'publication-guards.php', 'metadata-guards.php', 'settings-safety.php', 'used-css-grants.php', 'maintenance-integration.php', 'updates-integration.php']:
             code = (tests / name).read_text().replace('__CURRENT_VERSION__', version).replace('__FUTURE_VERSION__', future)
+            if name == 'used-css-grants.php':
+                code = code.replace('<?php', "<?php define('CWC_TEST_USED_CSS_GRANTS', true);", 1)
             blueprint['steps'].insert(-1, {'step': 'runPHP', 'code': code})
         path = tmp / 'blueprint.json'
         path.write_text(json.dumps(blueprint))
@@ -87,8 +89,17 @@ def main():
                 and updater['native_upgrade_completed'] and updater['tampered_package_rejected']
                 and updater['settings_and_grants_preserved'] and rest['permissions_preserved'] and report('styled-overlay')['published']):
             raise RuntimeError('Required native checks did not pass')
+        metadata_guards = report('metadata-guards')
+        if not metadata_guards['checks'] or metadata_guards['checks'] != len(metadata_guards['cases']):
+            raise RuntimeError('Metadata, schedule and audit regressions are incomplete')
+        settings = report('settings-safety')
+        if not settings['checks'] or settings['checks'] != len(settings['cases']):
+            raise RuntimeError('Settings and timezone regression results are incomplete')
+        grants = report('used-css-grants')
+        if not grants['checks'] or grants['checks'] != len(grants['cases']):
+            raise RuntimeError('Used CSS capability regression checks are incomplete')
         print(f"Passed on WordPress {install['wordpress']} and PHP {install['php']}. "
-              f"{admin['checks']} maintenance, {updater['checks']} updater, {rest['checks']} REST checks. ZIP SHA-256 {digest}")
+              f"{grants['checks']} Used CSS grant, {settings['checks']} settings and timezone, {admin['checks']} maintenance, {updater['checks']} updater, {rest['checks']} REST checks. ZIP SHA-256 {digest}")
 
 
 if __name__ == '__main__':

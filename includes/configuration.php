@@ -17,25 +17,60 @@ function initialise(): void {
 	}
 }
 
+/** Keep this local exclusion active during review of an older same-address installation. */
+function pdf_address_matches( array $saved, bool $bound ): bool {
+	if ( $bound ) {
+		return true;
+	}
+	if ( is_multisite() || 1 !== ( $saved['schema'] ?? null ) || true !== ( $saved['enabled'] ?? false )
+		|| array_key_exists( 'binding_hash', $saved ) || array_key_exists( 'reviewed_addresses', $saved )
+		|| ! empty( $saved['grant_cleanup_pending'] ) ) {
+		return false;
+	}
+	$identity = Connector\current_identity();
+	return Connector\valid_identity( $identity ) && Connector\settings_match( $saved, $identity );
+}
+
 /** Preserve every other format and every exclusion made by another filter. */
 function imagify_mime_types( array $mimes ): array {
-	if ( Connector\feature_enabled( 'imagify_pdf_protection' ) ) {
-		unset( $mimes['pdf'] );
+	$saved = Connector\settings();
+	if ( true !== ( $saved['imagify_pdf_protection'] ?? true ) || ! pdf_address_matches( $saved, Connector\is_bound() ) ) {
+		return $mimes;
 	}
-	return $mimes;
+	$allowed = array();
+	foreach ( $mimes as $extensions => $type ) {
+		if ( 'application/pdf' === $type ) {
+			continue;
+		}
+		// WordPress accepts pipe-separated extension aliases. Preserve the order of unrelated formats.
+		if ( is_string( $extensions ) && preg_match( '/^[a-z0-9]+(?:\|[a-z0-9]+)*$/iD', $extensions ) ) {
+			$parts      = array_filter( explode( '|', $extensions ), static fn( $part ) => 0 !== strcasecmp( $part, 'pdf' ) );
+			$extensions = implode( '|', $parts );
+			if ( '' === $extensions ) {
+				continue;
+			}
+		}
+		$allowed[ $extensions ] ??= $type;
+	}
+	// An empty map makes wp_check_filetype() restore every WordPress upload format.
+	// This pattern matches no extension and keeps a fully excluded list effective.
+	return $allowed ? $allowed : array( '^$' => 'application/x-church-connector-no-formats' );
 }
 
 /** Local readiness only: older Imagify releases do not provide this documented hook. */
 function pdf_protection_status(): array {
-	$enabled = true === ( Connector\settings()['imagify_pdf_protection'] ?? true );
+	$saved   = Connector\settings();
+	$enabled = true === ( $saved['imagify_pdf_protection'] ?? true );
 	$bound   = Connector\is_bound();
+	$allowed = pdf_address_matches( $saved, $bound );
 	$active  = defined( 'IMAGIFY_VERSION' ) && function_exists( 'imagify_get_mime_types' );
 	$version = $active ? (string) IMAGIFY_VERSION : null;
 	$hook    = $active && version_compare( $version, '2.3.1', '>=' );
+	$mimes   = $enabled && $allowed && $hook ? \imagify_get_mime_types() : array();
 	$state   = 'disabled';
 	$message = __( 'Switched off. Imagify may optimise PDFs according to its own settings.', 'church-website-connector' );
 	if ( $enabled ) {
-		if ( ! $bound ) {
+		if ( ! $allowed ) {
 			$state   = 'binding_paused';
 			$message = __( 'Enabled in saved settings, but paused. Review and save settings for this website address.', 'church-website-connector' );
 		} elseif ( ! $active ) {
@@ -44,7 +79,7 @@ function pdf_protection_status(): array {
 		} elseif ( ! $hook ) {
 			$state   = 'hook_unavailable';
 			$message = __( 'Enabled but ineffective. Update Imagify to 2.3.1 or newer for the supported-format filter.', 'church-website-connector' );
-		} elseif ( array_key_exists( 'pdf', \imagify_get_mime_types() ) ) {
+		} elseif ( in_array( 'application/pdf', $mimes, true ) || wp_check_filetype( 'document.pdf', $mimes )['type'] ) {
 			$state   = 'overridden';
 			$message = __( 'Enabled but ineffective. Another filter has restored PDF support; review the website code.', 'church-website-connector' );
 		} else {
@@ -68,7 +103,7 @@ function pdf_protection_status(): array {
 function render(): void {
 	$status = pdf_protection_status();
 	echo '<p><label for="cwc-imagify-pdf"><input type="checkbox" id="cwc-imagify-pdf" name="imagify_pdf_protection" value="1" aria-describedby="cwc-imagify-pdf-help"' . checked( $status['enabled'], true, false ) . '> ' . esc_html__( 'Prevent Imagify from optimising PDFs', 'church-website-connector' ) . '</label></p>';
-	echo '<p id="cwc-imagify-pdf-help">' . esc_html__( 'Helps preserve each PDF’s language declaration and accessibility information by excluding PDFs from Imagify. Images continue to follow Imagify’s settings and other exclusions. Applies to normal WordPress activity and background processing without an MCP connection. Enabled on new installations and once on upgrade when no choice is saved. Manually switching it off is remembered on later upgrades. Protection pauses if the website address changes until an administrator saves settings again.', 'church-website-connector' ) . '</p>';
+	echo '<p id="cwc-imagify-pdf-help">' . esc_html__( 'Helps preserve each PDF’s language declaration and accessibility information by excluding PDFs from Imagify. Images continue to follow Imagify’s settings and other exclusions. Applies to normal WordPress activity and background processing without an MCP connection. Enabled on new installations and once on upgrade when no choice is saved. Manually switching it off is remembered on later upgrades. PDF protection continues through a same-address upgrade while the connection tools await review. A changed address requires an administrator to review and save settings.', 'church-website-connector' ) . '</p>';
 	echo '<p>' . esc_html__( 'Prevention only: previously optimised PDFs keep their current contents until separately restored or replaced. This setting does not assign a language or rewrite documents. It requires Imagify 2.3.1 or newer and does nothing while Imagify is inactive.', 'church-website-connector' ) . '</p>';
 }
 

@@ -15,7 +15,7 @@ const FIELDS = [ 'source', 'target', 'title', 'http_code', 'group_id', 'position
 require_once __DIR__ . '/redirection-safety.php';
 
 function error( string $code, string $message, int $status = 400 ): \WP_Error {
-    return new \WP_Error( 'church_connector_redirect_' . $code, $message, [ 'status' => $status ] );
+	return \ChurchWebsiteConnector\RestTools\workflow_error( 'church_connector_redirect_', $code, $message, $status );
 }
 
 function readiness(): array {
@@ -45,8 +45,177 @@ function check( mixed $input, array $keys ) {
     return true;
 }
 
+/**
+ * Run the normal authorized provider callback inside a protected write.
+ * Bind the wrapper to this exact request so nested REST reads keep their own callbacks.
+ */
+function guarded_request( \WP_REST_Request $request, callable $write ) {
+	$guarded = null;
+	$invoked = false;
+	$guard   = static function ( $result, $target, $path, $handler ) use ( $request, $write, &$guarded, &$invoked ) {
+		if ( $request !== $target || null !== $result ) {
+			return $result;
+		}
+		$invoked = true;
+		$guarded = $write( $handler['callback'], $target );
+		return $guarded;
+	};
+	add_filter( 'rest_dispatch_request', $guard, PHP_INT_MAX, 4 );
+	try {
+		$response = rest_do_request( $request );
+		if ( ! $invoked && ! is_wp_error( $response ) && $response->get_status() < 400 ) {
+			return error( 'verification', 'Redirection did not run the reviewed native callback. Read the current state before retrying.', 409 );
+		}
+		return is_wp_error( $guarded ) ? $guarded : $response;
+	} finally {
+		remove_filter( 'rest_dispatch_request', $guard, PHP_INT_MAX );
+	}
+}
+
+/** Redirection uses separate statements for group changes and for counting and creating rules. */
+function rule_transaction( callable $operation ) {
+	global $wpdb;
+	$failed = error( 'write_atomic', 'The database could not protect the reviewed redirect change. Read the current state before retrying or use the native editor.', 409 );
+	if ( ! ( $wpdb instanceof \WP_SQLite_DB ) ) {
+		$engines = $wpdb->get_col( $wpdb->prepare( 'SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (%s, %s, %s)', $wpdb->prefix . 'redirection_groups', $wpdb->prefix . 'redirection_items', $wpdb->options ) );
+		// InnoDB next-key locks cover new rows, including inserts into an empty group.
+		// SET TRANSACTION fails when the caller already owns a running transaction.
+		if ( 3 !== count( $engines ) || array_diff( $engines, array( 'InnoDB', 'XtraDB' ) )
+			|| false === $wpdb->query( 'SET TRANSACTION ISOLATION LEVEL SERIALIZABLE' ) ) {
+			return $failed;
+		}
+	}
+	if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
+		return $failed;
+	}
+	$committed = false;
+	try {
+		if ( false === $wpdb->query( $wpdb->prepare( 'SELECT option_id FROM %i WHERE option_name = %s FOR UPDATE', $wpdb->options, \Red_Options::OPTION_KEY ) ) ) {
+			return $failed;
+		}
+		reset_native_options();
+		$response = $operation();
+		if ( is_wp_error( $response ) || ( $response instanceof \WP_HTTP_Response && $response->get_status() >= 400 ) ) {
+			return $response;
+		}
+		$committed = false !== $wpdb->query( 'COMMIT' );
+		return $committed ? $response : $failed;
+	} finally {
+		if ( ! $committed ) {
+			$wpdb->query( 'ROLLBACK' );
+			reset_native_options();
+		}
+	}
+}
+
+function reset_native_options(): void {
+	wp_cache_delete( \Red_Options::OPTION_KEY, 'options' );
+	wp_cache_delete( 'alloptions', 'options' );
+	wp_cache_delete( 'notoptions', 'options' );
+	\Red_Options::reset();
+	\Redirection\Settings\Settings::reset();
+}
+
+/** Check IDs under the same range lock used by the native writer. */
+function locked_rule_ids() {
+	global $wpdb;
+	$ids = $wpdb->get_col( $wpdb->prepare( 'SELECT id FROM %i ORDER BY id LIMIT %d FOR UPDATE', $wpdb->prefix . 'redirection_items', MAX_RULES + 1 ) );
+	return $wpdb->last_error || count( $ids ) > MAX_RULES
+		? error( 'analysis_limit', 'The current redirect rules cannot be checked within the review limit.', 409 ) : array_map( 'intval', $ids );
+}
+
+function rule_matches_review( array $saved, array $before, array $stored ): bool {
+	$op = $saved['operation'];
+	if ( in_array( $op, array( 'enable', 'disable' ), true ) ) {
+		$before['enabled'] = 'enable' === $op;
+		return configuration( $stored ) === configuration( $before );
+	}
+	$enabled  = 'create' === $op ? ( $saved['enabled'] ?? true ) : $before['enabled'];
+	$exclude  = 'create' === $op ? ( $saved['log_exclude'] ?? false ) : ! empty( $before['match_data']['options']['log_exclude'] );
+	$expected = ( new \Red_Item_Sanitize() )->get( payload( $saved['fields'], $before ) );
+	return plain_rule( $stored ) && $enabled === $stored['enabled'] && rule_fields( $stored ) === $saved['fields']
+		&& ! empty( $stored['match_data']['options']['log_exclude'] ) === $exclude
+		&& ! is_wp_error( $expected ) && $expected['match_url'] === $stored['match_url'];
+}
+
+function reviewed_rule_write( array $saved, callable $callback, \WP_REST_Request $request ) {
+	return rule_transaction(
+		static function () use ( $saved, $callback, $request ) {
+			global $wpdb;
+			$op     = $saved['operation'];
+			$id     = $saved['id'];
+			$fields = $saved['fields'];
+			$stale  = error( 'stale', 'The redirect, matching defaults or group changed during the save. Review it again.', 409 );
+			$failed = error( 'verification', 'The native redirect changed outside the approved review. The database change was rolled back.', 409 );
+			$before = array();
+			if ( 'create' === $op ) {
+				$ids = locked_rule_ids();
+				if ( is_wp_error( $ids ) || count( $ids ) >= MAX_RULES ) {
+					return error( 'analysis_limit', 'Redirection could not reserve room within the 1000-rule review limit.', 409 );
+				}
+				if ( isset( $saved['request']['changes'] ) && array_diff_assoc( array_diff_key( creation_defaults(), $saved['request']['changes'] ), $fields ) ) {
+					return $stale;
+				}
+			} else {
+				if ( 1 !== $wpdb->query( $wpdb->prepare( 'SELECT id FROM %i WHERE id = %d FOR UPDATE', $wpdb->prefix . 'redirection_items', $id ) ) ) {
+					return $stale;
+				}
+				$before = native_read( $id );
+				$item   = is_wp_error( $before ) ? $before : snapshot( $before );
+				if ( is_wp_error( $item ) || ! hash_equals( $saved['state_hash'], $item['state_hash'] ) ) {
+					return $stale;
+				}
+			}
+			$group = group( $fields['group_id'] );
+			if ( is_wp_error( $group ) || ! hash_equals( $saved['group_hash'], hash( 'sha256', wp_json_encode( group_configuration( $group ) ) ) ) ) {
+				return $stale;
+			}
+			if ( in_array( $op, array( 'create', 'update', 'enable' ), true ) ) {
+				$safety = redirect_safety( $fields, $id );
+				if ( is_wp_error( $safety ) ) {
+					return $safety;
+				}
+			}
+			$response = $callback( $request );
+			if ( is_wp_error( $response ) || ( $response instanceof \WP_HTTP_Response && $response->get_status() >= 400 ) ) {
+				return $response;
+			}
+			if ( 'create' === $op ) {
+				$after_ids = locked_rule_ids();
+				$new       = is_wp_error( $after_ids ) ? array() : array_values( array_diff( $after_ids, $ids ) );
+				if ( 1 !== count( $new ) || count( $after_ids ) !== count( $ids ) + 1 ) {
+					return $failed;
+				}
+				$id = $new[0];
+			}
+			$stored = native_read( $id );
+			if ( 'delete' === $op ) {
+				return is_wp_error( $stored ) && 'church_connector_redirect_missing' === $stored->get_error_code() ? $response : $failed;
+			}
+			if ( is_wp_error( $stored ) ) {
+				return $failed;
+			}
+			if ( ! rule_matches_review( $saved, $before, $stored ) ) {
+				return $failed;
+			}
+			if ( 'disable' !== $op ) {
+				$safety = redirect_safety( $fields, $id );
+				if ( is_wp_error( $safety ) ) {
+					return $safety;
+				}
+			}
+			if ( 'create' === $op ) {
+				// The new ID came from the locked before/after set, with its full content verified.
+				$response = rest_ensure_response( $response );
+				$response->set_data( array( 'created_id' => $id ) + $response->get_data() );
+			}
+			return $response;
+		}
+	);
+}
+
 /** Fixed internal routes retain the current user, native permissions and REST policy filters. */
-function dispatch( string $method, string $path, array $params = [] ) {
+function dispatch( string $method, string $path, array $params = array(), ?array $review = null ) {
     $read = $method === 'GET' && in_array( $path, [ '/redirection/v1/redirect', '/redirection/v1/group' ], true )
         && ! array_diff( array_keys( $params ), [ 'filterBy', 'per_page', 'page', 'orderby', 'direction' ] );
     $write = $method === 'POST' && preg_match( '~\A/redirection/v1/redirect(?:/[1-9][0-9]*)?\z~', $path )
@@ -57,7 +226,13 @@ function dispatch( string $method, string $path, array $params = [] ) {
     if ( ! $read && ! $write && ! $bulk ) { return error( 'route', 'This operation is outside the fixed Redirection route allowlist.', 403 ); }
     $request = new \WP_REST_Request( $method, $path );
     if ( $read ) { $request->set_query_params( $params ); } else { $request->set_body_params( $params ); }
-    $response = rest_do_request( $request );
+	if ( ! $read && null === $review ) {
+		return error( 'review', 'A native redirect write requires its reviewed state.', 409 );
+	}
+	$response = $read ? rest_do_request( $request ) : guarded_request(
+		$request,
+		static fn( $callback, $target ) => reviewed_rule_write( $review, $callback, $target )
+	);
     if ( is_wp_error( $response ) ) { return $response; }
     $data = $response->get_data();
     if ( $response->get_status() >= 400 ) {
@@ -122,13 +297,25 @@ function snapshot( array $row ) {
 }
 
 function capabilities( $input ) {
-    $checked = check( $input, [ 'site_url' ] ); if ( is_wp_error( $checked ) ) { return $checked; }
-    return [ 'site_url' => \ChurchWebsiteConnector\bound_site(), 'redirection' => readiness(),
-        'operations' => [ 'list', 'get', 'list_groups', 'create', 'update', 'enable', 'disable', 'delete' ], 'editable_fields' => FIELDS,
-        'administration' => 'Separate Redirection admin tools offer richer search, group changes, selected batches, plain rule imports and exports, matching defaults, and counts of retained log entries for a specified path.',
-        'preview_lifetime_seconds' => TTL, 'workflow' => 'Read the current rule, preview one change using its state_hash, review the diff, then apply its owner-bound token after approval. For create, omit id and state_hash. Delete is permanent and requires explicit confirmation. One outstanding Redirection preview per account.',
-        'safety_limits' => [ 'rules' => MAX_RULES, 'groups' => 200, 'chain_hops' => MAX_HOPS, 'matching_checks' => MAX_MATCHES ],
-        'limitations' => 'Checks equivalent sources and bounded local chains among plain WordPress URL rules. Regex/conditional rules, external aliases, other plugins and server redirects are not modelled. Single-rule tools accept plain rules only. The administration tools have separate fixed operations and do not return individual visitor records. Concurrent native-editor changes are checked optimistically; unrelated editors are not locked. Approval flags acknowledge client approval; they are not independent proof of human consent.' ];
+	$checked = check( $input, array( 'site_url' ) );
+	if ( is_wp_error( $checked ) ) {
+		return $checked; }
+	return array(
+		'site_url'                 => \ChurchWebsiteConnector\bound_site(),
+		'redirection'              => readiness(),
+		'operations'               => array( 'list', 'get', 'list_groups', 'create', 'update', 'enable', 'disable', 'delete' ),
+		'editable_fields'          => FIELDS,
+		'administration'           => 'Separate Redirection admin tools offer richer search, group changes, selected batches, plain rule imports and exports, matching defaults, and counts of retained log entries for a specified path.',
+		'preview_lifetime_seconds' => TTL,
+		'workflow'                 => 'Read the current rule, preview one change using its state_hash, review the diff, then apply its owner-bound token after approval. For create, omit id and state_hash. Delete is permanent and requires explicit confirmation. One outstanding Redirection preview per account.',
+		'safety_limits'            => array(
+			'rules'           => MAX_RULES,
+			'groups'          => 200,
+			'chain_hops'      => MAX_HOPS,
+			'matching_checks' => MAX_MATCHES,
+		),
+		'limitations'              => 'Checks equivalent sources and bounded local chains among plain WordPress URL rules. Regex/conditional rules, external aliases, other plugins and server redirects are not modelled. Single-rule tools accept plain rules only. The administration tools have separate fixed operations and do not return individual visitor records. Reviewed rule writes recheck current native configuration inside a database transaction. Approval flags acknowledge client approval; they are not independent proof of human consent.',
+	);
 }
 
 function listing( $input ) {
@@ -190,6 +377,15 @@ function payload( array $fields, array $row = [] ): array {
         'regex' => false, 'match_type' => 'url', 'match_data' => $match_data, 'action_type' => 'url', 'action_code' => $fields['http_code'], 'action_data' => [ 'url' => $fields['target'] ] ];
 }
 
+function creation_defaults(): array {
+	$native = \Red_Options::get();
+	return array(
+		'ignore_case'           => $native['flag_case'],
+		'ignore_trailing_slash' => $native['flag_trailing'],
+		'query_parameters'      => $native['flag_query'],
+	);
+}
+
 function normalise( array $base, mixed $changes, array $row = [] ) {
     if ( ! is_array( $changes ) || ! $changes || array_diff( array_keys( $changes ), FIELDS ) ) { return error( 'fields', 'Use only the documented URL redirect fields.' ); }
     $values = array_replace( $base, $changes );
@@ -222,7 +418,7 @@ function expire_preview( int $owner, string $hash ): void {
     if ( is_array( $saved ) && ( $saved['token_hash'] ?? '' ) === $hash && ( $saved['expires'] ?? 0 ) <= time() ) { remove_exact( stage_name( $owner ), $saved ); }
 }
 
-function preview( $input ) {
+function preview( $input, ?array $replaces = null ) {
     $checked = check( $input, [ 'site_url', 'operation', 'id', 'state_hash', 'changes' ] ); if ( is_wp_error( $checked ) ) { return $checked; }
     $op = $input['operation'] ?? '';
     if ( ! in_array( $op, [ 'create', 'update', 'enable', 'disable', 'delete' ], true ) ) { return error( 'operation', 'Choose create, update, enable, disable or delete.' ); }
@@ -230,7 +426,11 @@ function preview( $input ) {
     $row = []; $item = null; $id = $input['id'] ?? 0;
     if ( $op === 'create' ) {
         if ( isset( $input['id'] ) || isset( $input['state_hash'] ) ) { return error( 'input', 'Create must omit id and state_hash.' ); }
-        $base = [ 'title' => '', 'http_code' => 301, 'position' => 0, 'ignore_case' => true, 'ignore_trailing_slash' => true, 'query_parameters' => 'exact' ];
+		$base = array(
+			'title'     => '',
+			'http_code' => 301,
+			'position'  => 0,
+		) + creation_defaults();
     } else {
         if ( ! positive_id( $id ) ) { return error( 'id', 'Choose a positive integer redirect id.' ); }
         $row = native_read( $id ); if ( is_wp_error( $row ) ) { return $row; }
@@ -257,20 +457,25 @@ function preview( $input ) {
         $diff = $op === 'delete' ? [ 'redirect' => [ 'before' => $item, 'after' => null ] ] : [ 'enabled' => [ 'before' => $item['enabled'], 'after' => $op === 'enable' ] ];
     }
     $g = group( $fields['group_id'] ); if ( is_wp_error( $g ) ) { return $g; }
-    $saved = save_preview( [ 'operation' => $op, 'id' => $id, 'state_hash' => $item['state_hash'] ?? null, 'fields' => $fields, 'group_hash' => hash( 'sha256', wp_json_encode( group_configuration( $g ) ) ), 'changed_fields' => array_keys( $diff ) ] );
+	$saved = save_preview(
+		array(
+			'operation'      => $op,
+			'id'             => $id,
+			'state_hash'     => $item['state_hash'] ?? null,
+			'fields'         => $fields,
+			'group_hash'     => hash( 'sha256', wp_json_encode( group_configuration( $g ) ) ),
+			'changed_fields' => array_keys( $diff ),
+			'request'        => array_intersect_key( $input, array_flip( array( 'operation', 'changes', 'id', 'site_url' ) ) ),
+		),
+		$replaces
+	);
     if ( is_wp_error( $saved ) ) { return $saved; }
     return [ 'site_url' => \ChurchWebsiteConnector\bound_site(), 'operation' => $op, 'id' => $id, 'diff' => $diff, 'group' => $g,
         'message' => $op === 'delete' ? 'Preview only. Deletion is permanent with no undo. Obtain explicit confirmation before applying.' : 'Preview only; no redirect changed. Review and approve before applying. A new preview replaces your previous Redirection preview.' ] + $saved;
 }
 
-function save_preview( array $change ) {
-    $owner = get_current_user_id(); $token = bin2hex( random_bytes( 32 ) );
-    $old = get_option( stage_name( $owner ), false );
-    $saved = [ 'owner' => $owner, 'site' => \ChurchWebsiteConnector\current_identity(), 'token_hash' => hash( 'sha256', $token ), 'expires' => time() + TTL ] + $change;
-    if ( ! update_option( stage_name( $owner ), $saved, false ) ) { return error( 'storage', 'The preview could not be retained. No rule was changed.', 503 ); }
-    if ( is_array( $old ) && isset( $old['token_hash'] ) ) { wp_clear_scheduled_hook( EXPIRE_HOOK, [ $owner, $old['token_hash'] ] ); }
-    wp_schedule_single_event( $saved['expires'], EXPIRE_HOOK, [ $owner, $saved['token_hash'] ] );
-    return [ 'preview_token' => $token, 'expires_at_utc' => gmdate( 'c', $saved['expires'] ) ];
+function save_preview( array $change, ?array $replaces = null ) {
+	return \ChurchWebsiteConnector\RestTools\stage_review( $change, $replaces, PREFIX, EXPIRE_HOOK, TTL, 'church_connector_redirect_' );
 }
 
 function load_preview( mixed $token ) {
@@ -278,29 +483,66 @@ function load_preview( mixed $token ) {
     $saved = get_option( stage_name( get_current_user_id() ), false );
     if ( ! is_array( $saved ) || ( $saved['owner'] ?? 0 ) !== get_current_user_id() || ! hash_equals( (string) ( $saved['token_hash'] ?? '' ), hash( 'sha256', $token ) ) ) { return error( 'token', 'This preview is unavailable for the signed-in account.', 410 ); }
     if ( $saved['expires'] <= time() ) { expire_preview( get_current_user_id(), $saved['token_hash'] ); return error( 'expired', 'The preview expired. Prepare a new one.', 410 ); }
-    if ( $saved['site'] !== \ChurchWebsiteConnector\current_identity() ) { return error( 'site', 'The preview belongs to a different website configuration.', 403 ); }
+	if ( ! \ChurchWebsiteConnector\RestTools\preview_site_matches( $saved ) ) {
+		return error( 'site', 'This review belongs to an earlier or different website configuration. Prepare a fresh preview.', 403 );
+	}
     return $saved;
 }
 
 function audit( array $saved, string $result ): void {
-    $rows = (array) get_option( AUDIT, [] );
-    array_unshift( $rows, [ 'time_utc' => gmdate( 'Y-m-d\TH:i:s\Z' ), 'user_id' => get_current_user_id(), 'operation' => $saved['operation'], 'id' => $saved['id'], 'fields' => $saved['changed_fields'], 'result' => $result ] );
-    update_option( AUDIT, array_slice( $rows, 0, 50 ), false );
+	\ChurchWebsiteConnector\RestTools\append_audit(
+		AUDIT,
+		array(
+			'time_utc'  => gmdate( 'Y-m-d\TH:i:s\Z' ),
+			'user_id'   => get_current_user_id(),
+			'operation' => $saved['operation'],
+			'id'        => $saved['id'],
+			'fields'    => $saved['changed_fields'],
+			'result'    => $result,
+		)
+	);
 }
 
 function acquire_lock() {
-    $lock = wp_json_encode( [ 'expires' => time() + 120, 'token' => wp_generate_uuid4() ] );
-    if ( ! add_option( LOCK, $lock, '', false ) ) {
-        $old = get_option( LOCK, '' ); $decoded = json_decode( (string) $old, true );
-        if ( ! is_array( $decoded ) || ( $decoded['expires'] ?? PHP_INT_MAX ) >= time() || ! remove_exact( LOCK, $old ) || ! add_option( LOCK, $lock, '', false ) ) { return error( 'busy', 'Another connector redirect change is running.', 409 ); }
-    }
-    return $lock;
+	global $wpdb;
+	$lock = wp_json_encode(
+		array(
+			'expires' => time() + 120,
+			'token'   => wp_generate_uuid4(),
+		)
+	);
+	if ( \ChurchWebsiteConnector\RestTools\insert_lock( LOCK, $lock ) ) {
+		return $lock;
+	}
+	$old     = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", LOCK ) );
+	$decoded = is_string( $old ) ? json_decode( $old, true ) : null;
+	if ( is_array( $decoded ) && ( $decoded['expires'] ?? PHP_INT_MAX ) < time() ) {
+		$claimed = $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND HEX(option_value) = HEX(%s)", $lock, LOCK, $old ) );
+		if ( 1 === $claimed ) {
+			wp_cache_delete( LOCK, 'options' );
+			return $lock;
+		}
+	}
+	return error( 'busy', 'Another connector redirect change is running.', 409 );
 }
 
 function consume( array $saved ): bool {
     if ( ! remove_exact( stage_name( get_current_user_id() ), $saved ) ) { return false; }
     wp_clear_scheduled_hook( EXPIRE_HOOK, [ get_current_user_id(), $saved['token_hash'] ] );
     return true;
+}
+
+function refresh_rule( array $saved, ?string $hash ): \WP_Error {
+	$error = error( 'stale', 'The redirect or its group changed after preview.', 409 );
+	if ( ! isset( $saved['request'] ) ) {
+		\ChurchWebsiteConnector\RestTools\retire_preview( $saved, PREFIX, EXPIRE_HOOK );
+		return $error;
+	}
+	$request = $saved['request'];
+	if ( null !== $hash ) {
+		$request['state_hash'] = $hash;
+	}
+	return \ChurchWebsiteConnector\RestTools\refreshed_error( $error, preview( $request, $saved ), $saved, PREFIX, EXPIRE_HOOK );
 }
 
 function apply( $input ) {
@@ -312,33 +554,58 @@ function apply( $input ) {
     $lock = acquire_lock(); if ( is_wp_error( $lock ) ) { return $lock; }
     try {
         $op = $saved['operation']; $id = $saved['id']; $row = [];
+		if ( 'create' === $op && isset( $saved['request']['changes'] ) ) {
+			$defaults = array_diff_key( creation_defaults(), $saved['request']['changes'] );
+			if ( array_diff_assoc( $defaults, $saved['fields'] ) ) {
+				return refresh_rule( $saved, null );
+			}
+		}
         if ( $op !== 'create' ) {
             $row = native_read( $id ); if ( is_wp_error( $row ) ) { return $row; }
             $current = snapshot( $row ); if ( is_wp_error( $current ) ) { return $current; }
-            if ( ! $current['editable'] || ! hash_equals( $saved['state_hash'], $current['state_hash'] ) ) { return error( 'stale', 'The redirect or group changed after preview. Prepare a new preview.', 409 ); }
+			if ( ! $current['editable'] || ! hash_equals( $saved['state_hash'], $current['state_hash'] ) ) {
+				return refresh_rule( $saved, $current['state_hash'] ?? null );
+			}
         }
         $g = group( $saved['fields']['group_id'] ); if ( is_wp_error( $g ) ) { return $g; }
-        if ( ! hash_equals( $saved['group_hash'], hash( 'sha256', wp_json_encode( group_configuration( $g ) ) ) ) ) { return error( 'stale', 'The group changed after preview.', 409 ); }
+		if ( ! hash_equals( $saved['group_hash'], hash( 'sha256', wp_json_encode( group_configuration( $g ) ) ) ) ) {
+			return refresh_rule( $saved, $current['state_hash'] ?? null );
+		}
         if ( in_array( $op, [ 'create', 'update', 'enable' ], true ) ) {
             $fields = normalise( $saved['fields'], $saved['fields'], $row ); if ( is_wp_error( $fields ) ) { return $fields; }
-            if ( $fields !== $saved['fields'] ) { return error( 'stale', 'Native validation changed after preview.', 409 ); }
+			if ( $fields !== $saved['fields'] ) {
+				return refresh_rule( $saved, $current['state_hash'] ?? null );
+			}
             $conflicts = redirect_safety( $fields, $id ); if ( is_wp_error( $conflicts ) ) { return $conflicts; }
         }
         if ( ! consume( $saved ) ) { return error( 'token', 'The preview was replaced or consumed.', 409 ); }
         if ( $op === 'create' || $op === 'update' ) {
             $body = payload( $saved['fields'], $row );
             if ( $op === 'create' ) { $body['status'] = 'enabled'; }
-            $result = dispatch( 'POST', '/redirection/v1/redirect' . ( $op === 'update' ? '/' . $id : '' ), $body );
+			$result = dispatch( 'POST', '/redirection/v1/redirect' . ( 'update' === $op ? '/' . $id : '' ), $body, $saved );
         } else {
-            $result = dispatch( 'POST', '/redirection/v1/bulk/redirect/' . $op, [ 'items' => [ $id ], 'global' => false ] );
+			$result = dispatch(
+				'POST',
+				'/redirection/v1/bulk/redirect/' . $op,
+				array(
+					'items'  => array( $id ),
+					'global' => false,
+				),
+				$saved
+			);
         }
+		if ( is_wp_error( $result ) && in_array( $result->get_error_code(), array( 'church_connector_redirect_analysis_limit', 'church_connector_redirect_stale', 'church_connector_redirect_duplicate', 'church_connector_redirect_loop', 'church_connector_redirect_verification' ), true ) ) {
+			audit( $saved, 'error' );
+			return $result;
+		}
         if ( is_wp_error( $result ) ) { audit( $saved, 'error' ); return error( 'failed', 'Redirection did not complete cleanly: ' . $result->get_error_message() . ' Inspect the rule before retrying; the preview is consumed.', 500 ); }
-        if ( $op === 'create' ) {
-            $found = dispatch( 'GET', '/redirection/v1/redirect', [ 'filterBy' => [ 'url' => $saved['fields']['source'] ], 'per_page' => 200, 'page' => 0 ] );
-            $matches = is_wp_error( $found ) ? [] : array_values( array_filter( $found['items'] ?? [], static fn( $r ) => ( $r['url'] ?? '' ) === $saved['fields']['source'] ) );
-            if ( count( $matches ) !== 1 ) { audit( $saved, 'verification_unavailable' ); return error( 'verification', 'Creation was processed but could not be uniquely verified. Inspect the source before retrying.', 502 ); }
-            $id = (int) $matches[0]['id'];
-        }
+		if ( 'create' === $op ) {
+			$id = $result['created_id'] ?? 0;
+			if ( ! positive_id( $id ) ) {
+				audit( $saved, 'verification_unavailable' );
+				return error( 'verification', 'Redirection did not return the verified new rule ID. Inspect the group before retrying.', 502 );
+			}
+		}
         $after = native_read( $id );
         if ( $op === 'delete' ) {
             if ( ! is_wp_error( $after ) || $after->get_error_code() !== 'church_connector_redirect_missing' ) { audit( $saved, 'verification_unavailable' ); return error( 'verification', 'Deletion was processed but could not be verified. Inspect before retrying.', 502 ); }
@@ -347,7 +614,7 @@ function apply( $input ) {
             if ( is_wp_error( $after ) ) { audit( $saved, 'verification_unavailable' ); return error( 'verification', 'The write was processed but reading it back failed. Inspect before retrying.', 502 ); }
             $item = snapshot( $after );
             if ( is_wp_error( $item ) ) { audit( $saved, 'verification_unavailable' ); return $item; }
-            $matches = $op === 'enable' || $op === 'disable' ? $item['enabled'] === ( $op === 'enable' ) : $item['fields'] === $saved['fields'];
+			$matches = rule_matches_review( $saved, $row, $after );
             if ( ! $matches ) { audit( $saved, 'normalised' ); return error( 'verification', 'Native filters stored different values. Inspect the rule before retrying; the preview is consumed.', 409 ); }
         }
         $saved['id'] = $id; audit( $saved, 'verified' );

@@ -48,10 +48,15 @@ function rows( array $status ): array {
 	$add( 'licence', 'GeneratePress One licence', true === $d['generatepress_license_cached_active'] ? 'Active in the cached local check' : 'Check or activate in Settings → GeneratePress AI.', true === $d['generatepress_license_cached_active'] ? 'green' : 'red' );
 	$blocks = $d['generateblocks_version'] && version_compare( $d['generateblocks_version'], '2.3', '>=' );
 	$add( 'generateblocks', 'GenerateBlocks', $blocks ? 'Active: ' . $d['generateblocks_version'] : 'Install or update GenerateBlocks to 2.3 or newer.', $blocks ? 'green' : 'red' );
-	$add( 'rocket', 'WP Rocket', $d['wp_rocket_version'] ? 'Active: ' . $d['wp_rocket_version'] : 'Install and activate your licensed WP Rocket plugin.', $d['wp_rocket_version'] ? 'green' : 'red' );
-	$library = $d['wp_rocket_oauth'] && $adapter['compatible'];
-	$add( 'rocket_connection', 'WP Rocket connection library', $library ? 'Available. GeneratePress can carry its tools; separate WP Rocket sign-in is only needed for the alternative connection.' : 'Finish WP Rocket and MCP Adapter setup. This checks the installed library, not completed sign-in.', $library ? 'green' : 'red' );
-	$primary = $status['primary_connection'];
+	$primary          = $status['primary_connection'];
+	$requires_rocket  = 'separate_connections' === $primary['selected'];
+	$rocket_available = ! empty( $d['wp_rocket_version'] );
+	$library          = $d['wp_rocket_oauth'] && $adapter['compatible'];
+	$rocket_missing   = $requires_rocket ? 'Install WP Rocket for the selected connection.' : 'Optional for this connection. Install WP Rocket to use its cache tools.';
+	$library_missing  = $requires_rocket ? 'Finish WP Rocket and MCP Adapter setup for the selected connection.' : 'The alternative WP Rocket connection is optional.';
+
+	$add( 'rocket', 'WP Rocket', $rocket_available ? 'Active: ' . $d['wp_rocket_version'] : $rocket_missing, $rocket_available ? 'green' : ( $requires_rocket ? 'red' : 'yellow' ) );
+	$add( 'rocket_connection', 'WP Rocket connection library', $library ? 'Available. Separate WP Rocket sign-in is only needed for the alternative connection.' : $library_missing, $library ? 'green' : ( $requires_rocket ? 'red' : 'yellow' ) );
 	$add( 'primary', 'WordPress and plugin tools through MCP', $primary['label'], $primary['level'] );
 	$pdf   = $status['pdf_upload'];
 	$limit = rtrim( rtrim( number_format( $pdf['max_bytes'] / 1048576, 2, '.', '' ), '0' ), '.' ) . ' MiB';

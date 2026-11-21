@@ -86,6 +86,26 @@ function environment_ready(): bool {
 		&& function_exists( 'wp_get_ability' );
 }
 
+/**
+ * Ask the provider to probe its REST route and adapter registry only on diagnostics.
+ * Registration itself calls ability_ids() before the provider's route exists.
+ */
+function connection_ready(): bool {
+	if ( ! environment_ready() || ! is_callable( array( '\GeneratePress_AI_MCP', 'get_instance' ) ) ) {
+		return false;
+	}
+	try {
+		$provider = \GeneratePress_AI_MCP::get_instance();
+		if ( ! is_callable( array( $provider, 'get_registration_status' ) ) ) {
+			return false;
+		}
+		$registration = $provider->get_registration_status( true );
+		return true === ( $registration['ready'] ?? false );
+	} catch ( \Throwable $exception ) {
+		return false;
+	}
+}
+
 /** Use the provider's public extension filter; retain each native callback. */
 function ability_ids( $ids ) {
 	if ( ! is_array( $ids ) || ! \ChurchWebsiteConnector\feature_enabled( 'generatepress_bridge' ) || ! environment_ready() ) {
