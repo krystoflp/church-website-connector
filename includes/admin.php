@@ -6,7 +6,10 @@ namespace ChurchWebsiteConnector;
 defined( 'ABSPATH' ) || exit;
 
 function admin_menu(): void {
-	add_options_page( 'Website Connector', 'Website Connector', 'manage_options', 'church-website-connector', __NAMESPACE__ . '\\admin_page' );
+	$page = add_options_page( 'Website Connector', 'Website Connector', 'manage_options', 'church-website-connector', __NAMESPACE__ . '\\admin_page' );
+	if ( $page ) {
+		add_action( 'load-' . $page, __NAMESPACE__ . '\\Updates\\check_on_settings_load' );
+	}
 }
 
 function plugin_links( array $links ): array {

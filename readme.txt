@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.13.6
+Stable tag: 1.13.7
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -178,7 +178,7 @@ unpublished tags and development branches are not update sources. Each release
 must include its versioned plugin ZIP and matching JSON metadata with compatibility
 requirements and a SHA-256 checksum. Incomplete or malformed releases are rejected,
 and the downloaded ZIP is checked before WordPress installs it. Update checks are
-cached for 12 hours; failed checks are cached briefly. If GitHub is unavailable,
+cached for 12 hours after success and 15 minutes after failure. If GitHub is unavailable,
 the currently installed connector continues running.
 
 Checks use GitHub's public HTTPS endpoints without GitHub credentials or a
@@ -566,6 +566,11 @@ batches, reviewed matching defaults and portable plain-rule import/export.
 
 == Changelog ==
 
+= 1.13.7 =
+
+* Mark the installed connector version amber when a newer stable release is known. Show the installed and available versions. An unsuccessful check identifies the last known result.
+* Check GitHub when an administrator opens Settings > Website Connector with permission to update plugins. Reuse a successful check for 12 hours and retry a failed check after 15 minutes. Check for updates now still requests an immediate check.
+
 = 1.13.6 =
 
 * Include the saved wording and excerpt in publication and scheduling reviews. Long or complex drafts link to the WordPress preview. Earlier publication approvals require a fresh review.
@@ -804,9 +809,11 @@ batches, reviewed matching defaults and portable plain-rule import/export.
 
 The top status panel shows the installed and latest known stable connector
 versions, native auto-update preferences and policy, last release check, last
-successful check, primary connection and actionable compatibility issues. Opening
-settings makes local reads only; use Check for updates now for a fresh GitHub
-lookup. Update history stores timestamps, outcome and a validated version only.
+successful check, primary connection and actionable compatibility issues. From
+1.13.7, opening this settings screen with permission to update plugins checks
+GitHub when the previous result is due for refresh. A newer stable release marks
+the installed version amber. Use Check for updates now to bypass the interval
+and refresh the connector’s entry in Installed Plugins. Update history stores timestamps, outcome and a validated version only.
 
 Pending MCP Adapter installation is informational. During the administrator setup
 request, notices and readiness rows show installation or activation progress.
