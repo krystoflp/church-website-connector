@@ -6,11 +6,13 @@ namespace ChurchWebsiteConnector\Updates;
 
 defined( 'ABSPATH' ) || exit;
 
-const REPOSITORY   = 'https://github.com/krystoflp/church-website-connector';
-const API          = 'https://api.github.com/repos/krystoflp/church-website-connector/releases/';
-const SLUG         = 'church-website-connector';
-const CACHE        = 'church_connector_release_';
-const CHECK_STATUS = 'church_connector_update_status';
+const REPOSITORY    = 'https://github.com/krystoflp/church-website-connector';
+const API           = 'https://api.github.com/repos/krystoflp/church-website-connector/releases/';
+const SLUG          = 'church-website-connector';
+const CACHE         = 'church_connector_release_';
+const CHECK_STATUS  = 'church_connector_update_status';
+const CACHE_HOURS   = 12;
+const RETRY_MINUTES = 15;
 
 function plugin_file(): string {
 	return plugin_basename( dirname( __DIR__ ) . '/church-website-connector.php' );
@@ -53,7 +55,7 @@ function fetch_json( string $url, bool $api = false ) {
 function release_failure( string $version, $cause = false ): array {
 	if ( '' === $version ) {
 		if ( is_wp_error( $cause ) ) {
-			set_transient( CACHE . 'latest_unavailable', true, 15 * MINUTE_IN_SECONDS );
+			set_transient( CACHE . 'latest_unavailable', true, RETRY_MINUTES * MINUTE_IN_SECONDS );
 		} else {
 			delete_transient( CACHE . 'last_verified' );
 		}
@@ -75,7 +77,7 @@ function release( string $version = '' ): array {
 		delete_transient( CACHE . 'latest_unavailable' );
 	}
 	// Cache failures briefly too; a GitHub outage must not repeatedly delay requests.
-	set_transient( $key, array(), 15 * MINUTE_IN_SECONDS );
+	set_transient( $key, array(), RETRY_MINUTES * MINUTE_IN_SECONDS );
 	$data = fetch_json( API . ( '' === $version ? 'latest' : 'tags/v' . $version ), true );
 	if ( ! is_array( $data ) || ( $data['draft'] ?? true ) !== false || ( $data['prerelease'] ?? true ) !== false
 		|| ! is_string( $data['tag_name'] ?? null ) || ! str_starts_with( $data['tag_name'], 'v' )
@@ -136,8 +138,8 @@ function release( string $version = '' ): array {
 		record_check( true, $found_version );
 		set_transient( CACHE . 'last_verified', $result, 24 * HOUR_IN_SECONDS );
 	}
-	set_transient( CACHE . $found_version, $result, 12 * HOUR_IN_SECONDS );
-	set_transient( $key, $result, 12 * HOUR_IN_SECONDS );
+	set_transient( CACHE . $found_version, $result, CACHE_HOURS * HOUR_IN_SECONDS );
+	set_transient( $key, $result, CACHE_HOURS * HOUR_IN_SECONDS );
 	return $result;
 }
 
@@ -310,6 +312,22 @@ function verified_source( $source, $remote_source, $upgrader, array $extra ) {
 	return $source;
 }
 
+/** Refresh release information on the settings screen, even when automatic updates are off. */
+function check_on_settings_load(): void {
+	if ( ! current_user_can( 'manage_options' ) || ! current_user_can( 'update_plugins' ) ) {
+		return;
+	}
+
+	// Transients can be evicted early. Retain the check interval across ordinary page refreshes.
+	$history  = \ChurchWebsiteConnector\Maintenance\update_status();
+	$age      = time() - $history['last_attempt'];
+	$interval = 'success' === $history['result'] ? CACHE_HOURS * HOUR_IN_SECONDS : RETRY_MINUTES * MINUTE_IN_SECONDS;
+	if ( 'not_checked' !== $history['result'] && $age >= 0 && $age < $interval ) {
+		return;
+	}
+	release();
+}
+
 /** Check immediately from the administrator's nonce-protected form; never install. */
 function check_now(): array|\WP_Error {
 	if ( ! current_user_can( 'manage_options' ) || ! current_user_can( 'update_plugins' ) ) {
@@ -404,6 +422,7 @@ function render_notice(): void {
 			case 'available':
 				/* translators: %s: Latest connector version. */
 				$message = sprintf( __( 'Version %s is available. Open Installed Plugins and choose Update now for Church Website Connector.', 'church-website-connector' ), $version );
+				$type    = 'warning';
 				break;
 			case 'incompatible':
 				/* translators: %s: Latest connector version. */

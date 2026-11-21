@@ -109,7 +109,13 @@ can publish releases. Sites need no GitHub account or access token to update.
 
 GPL-2.0-or-later. See [LICENSE](LICENSE).
 
-## Immediate update checks (1.7.1)
+## Checking for connector updates
+
+From 1.13.7, opening **Settings → Website Connector** with plugin-update permission
+checks GitHub for the latest stable release when a fresh check is due. A newer
+release marks the installed version amber and shows both version numbers. Settings
+visits reuse successful checks for 12 hours and retry failures after 15 minutes.
+WordPress continues to manage automatic installation according to the site's settings.
 
 In **Settings → Website Connector → Automatic updates**, select **Check for updates
 now**. The nonce-protected administrator action bypasses both successful and failed

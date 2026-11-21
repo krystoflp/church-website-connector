@@ -66,6 +66,96 @@ $force_off=static fn($decision,$item)=>($item->plugin??'')===$plugin?false:$deci
 updater_check(!str_contains($html,'toggle-auto-update')&&str_contains($html,'Auto-updates disabled'),'Native per-plugin policy still controls availability');remove_filter('auto_update_plugin',$force_off,20);
 update_site_option('auto_update_plugins',$auto_before);
 
+// Register the settings page the same way as the native admin menu, under Settings.
+$GLOBALS['admin_page_hooks']['options-general.php'] = 'settings';
+ChurchWebsiteConnector\admin_menu();
+$settings_load = 'load-' . get_plugin_page_hookname( U\SLUG, 'options-general.php' );
+updater_check( 'load-settings_page_church-website-connector' === $settings_load, 'The fixture dispatches the native Website Connector settings load hook' );
+
+function installed_connector_row() {
+    ob_start();
+    ChurchWebsiteConnector\Maintenance\render_summary( ChurchWebsiteConnector\connection_status() );
+    $summary = ob_get_clean();
+    if ( ! preg_match( '~<tr><th scope="row">Installed connector</th><td>(.*?)</td></tr>~s', $summary, $row ) ) {
+        throw new RuntimeException( 'Installed connector status row missing from settings' );
+    }
+    return $row[1];
+}
+
+delete_option( U\CHECK_STATUS );
+delete_transient( U\CACHE . 'latest' );
+$requests_before = count( $requests );
+do_action( 'load-settings_page_unrelated' );
+ChurchWebsiteConnector\mcp_connection_status();
+ChurchWebsiteConnector\Maintenance\diagnostic_report();
+updater_check( str_contains( installed_connector_row(), 'cwc-status-yellow' ) && count( $requests ) === $requests_before, 'An unchecked version is unconfirmed; rendering summaries, diagnostics and unrelated screens does not poll GitHub' );
+foreach ( [ 'manage_options', 'update_plugins' ] as $denied_cap ) {
+    $deny_cap = static function( $caps ) use ( $denied_cap ) { $caps[ $denied_cap ] = false; return $caps; };
+    add_filter( 'user_has_cap', $deny_cap );
+    do_action( $settings_load );
+    remove_filter( 'user_has_cap', $deny_cap );
+    updater_check( count( $requests ) === $requests_before && false === get_option( U\CHECK_STATUS ), 'Settings cannot start a release lookup without ' . $denied_cap );
+}
+
+$other_updates = clone $empty_updates;
+$other_updates->response['other/keep.php'] = (object) [ 'new_version' => '8.0' ];
+$other_updates->translations = [ [ 'slug' => 'other', 'language' => 'en_GB' ] ];
+set_site_transient( 'update_plugins', $other_updates );
+$reference_updates = serialize( get_site_transient( 'update_plugins' ) );
+update_site_option( 'auto_update_plugins', [ 'other/keep.php' ] );
+do_action( $settings_load );
+$row = installed_connector_row();
+updater_check( [ U\API . 'latest', U\asset_url( '__FUTURE_VERSION__', 'json' ) ] === array_slice( $requests, $requests_before ), 'First authorised settings load checks only the stable release and its metadata' );
+updater_check( str_contains( $row, 'cwc-status-yellow' ) && str_contains( $row, 'Update available' ) && str_contains( $row, '__CURRENT_VERSION__' ) && str_contains( $row, '__FUTURE_VERSION__' ), 'A newer stable release makes the installed version amber and names both versions' );
+$requests_before = count( $requests );
+do_action( $settings_load );
+updater_check( count( $requests ) === $requests_before && get_option( '_transient_timeout_' . U\CACHE . 'latest' ) >= time() + 12 * HOUR_IN_SECONDS - 10, 'Repeated settings loads share the successful 12-hour release cache' );
+delete_transient( U\CACHE . 'latest' );
+do_action( $settings_load );
+updater_check( count( $requests ) === $requests_before, 'A successful check limits page refreshes even if the release transient is evicted early' );
+updater_check( serialize( get_site_transient( 'update_plugins' ) ) === $reference_updates && get_option( ChurchWebsiteConnector\SETTINGS ) === $settings_before && get_site_option( 'auto_update_plugins', [] ) === [ 'other/keep.php' ], 'Checking with automatic updates off preserves other offers, translations, schedule, settings and update preferences' );
+
+$saved_check = get_option( U\CHECK_STATUS );
+foreach ( [ '__CURRENT_VERSION__', '0.1.0' ] as $known_stable ) {
+    update_option( U\CHECK_STATUS, array_merge( $saved_check, [ 'latest' => $known_stable ] ) );
+    $row = installed_connector_row();
+    updater_check( str_contains( $row, 'cwc-status-green' ) && str_contains( $row, '__CURRENT_VERSION__' ) && ! str_contains( $row, 'Update available' ), 'A verified equal or older release does not call for an update: ' . $known_stable );
+}
+$aged_check = $saved_check;
+$aged_check['last_success'] = time() - 12 * HOUR_IN_SECONDS - 1;
+$aged_check['last_attempt'] = $aged_check['last_success'];
+update_option( U\CHECK_STATUS, $aged_check );
+updater_check( str_contains( installed_connector_row(), 'cwc-status-yellow' ) && str_contains( installed_connector_row(), '__FUTURE_VERSION__' ) && ! str_contains( installed_connector_row(), 'Update available' ), 'Stale successful evidence retains a warning without claiming a newly confirmed update' );
+
+$offline = static fn( $response, $args, $url ) => U\API . 'latest' === $url ? new WP_Error( 'offline', 'Fixture outage' ) : $response;
+add_filter( 'pre_http_request', $offline, 20, 3 );
+delete_transient( U\CACHE . 'latest' );
+do_action( $settings_load );
+$history = ChurchWebsiteConnector\Maintenance\update_status();
+updater_check( count( $requests ) === $requests_before + 1 && 'failed' === $history['result'] && '__FUTURE_VERSION__' === $history['latest'] && str_contains( installed_connector_row(), 'cwc-status-yellow' ), 'On expiry, a failed lookup keeps the last known newer release and never shows the installed version as OK' );
+do_action( $settings_load );
+updater_check( count( $requests ) === $requests_before + 1 && get_option( '_transient_timeout_' . U\CACHE . 'latest' ) <= time() + 15 * MINUTE_IN_SECONDS && get_option( '_transient_timeout_' . U\CACHE . 'latest' ) >= time() + 15 * MINUTE_IN_SECONDS - 10, 'A failed check is cached for 15 minutes across page loads' );
+delete_transient( U\CACHE . 'latest' );
+do_action( $settings_load );
+updater_check( count( $requests ) === $requests_before + 1, 'Eviction of the failed release transient does not start another page check during the backoff' );
+remove_filter( 'pre_http_request', $offline, 20 );
+$history['last_attempt'] = time() - 15 * MINUTE_IN_SECONDS - 1;
+update_option( U\CHECK_STATUS, $history );
+do_action( $settings_load );
+updater_check( count( $requests ) === $requests_before + 3 && 'success' === ChurchWebsiteConnector\Maintenance\update_status()['result'], 'The settings screen retries automatically when the failure cache expires' );
+
+delete_option( U\CHECK_STATUS );
+$listed = clone $other_updates;
+$listed->response[$plugin] = (object) [ 'id' => U\REPOSITORY, 'new_version' => '__FUTURE_VERSION__' ];
+set_site_transient( 'update_plugins', $listed );
+$row = installed_connector_row();
+updater_check( str_contains( $row, 'cwc-status-yellow' ) && str_contains( $row, 'Update listed' ) && str_contains( $row, '__FUTURE_VERSION__' ), 'An official WordPress offer remains visible even when the saved release history is missing' );
+$listed->response[$plugin]->id = 'https://other.example/another-plugin';
+set_site_transient( 'update_plugins', $listed );
+updater_check( ! str_contains( installed_connector_row(), '__FUTURE_VERSION__' ) && count( $requests ) === $requests_before + 3, 'An unrelated source cannot supply the displayed update version' );
+update_site_option( 'auto_update_plugins', $auto_before );
+delete_transient( U\CACHE . 'latest' );
+
 updater_check( get_plugin_data( WP_PLUGIN_DIR . '/' . $plugin )['UpdateURI'] === U\REPOSITORY, 'Plugin header selects exact GitHub update source' );
 delete_site_transient( 'update_plugins' ); wp_update_plugins();
 $updates = get_site_transient( 'update_plugins' );
@@ -105,7 +195,7 @@ updater_check( str_contains( $html, 'Check for updates now' ) && str_contains( $
 updater_check( get_transient( 'church_connector_update_notice_1' ) === false, 'Result notice consumed once for current user' );
 // Reproduce the refreshed settings page for every update-check outcome.
 foreach ( [
-    'available' => [ 'notice-success', 'Version __FUTURE_VERSION__ is available.' ],
+    'available' => [ 'notice-warning', 'Version __FUTURE_VERSION__ is available.' ],
     'current' => [ 'notice-success', 'You are up to date.' ],
     'ahead' => [ 'notice-success', 'Your installed connector is newer' ],
     'incompatible' => [ 'notice-warning', 'it requires a newer WordPress or PHP version' ],
@@ -224,5 +314,5 @@ updater_check( get_option( 'active_plugins' ) === $active_before, 'Native upgrad
 updater_check( in_array( $plugin, (array) get_site_option( 'auto_update_plugins', [] ), true ), 'Native upgrade preserves administrator auto-update opt-in' );
 update_site_option( 'auto_update_plugins', $auto_before );
 remove_filter( 'pre_http_request', $mock, 10 );
-file_put_contents( '/reports/github-updates.json', wp_json_encode( [ 'checks' => $checks, 'source' => U\REPOSITORY, 'synthetic_future_version' => '__FUTURE_VERSION__', 'native_core_discovery' => true, 'native_auto_update_control_without_release_data' => true, 'existing_policy_and_preferences_preserved' => true, 'immediate_check' => true, 'immediate_check_only' => true, 'result_notice_at_top' => true, 'all_result_notice_types_verified' => true, 'immediate_failure_preserves_offers' => true, 'native_upgrade_completed' => true, 'tampered_package_rejected' => true, 'settings_and_grants_preserved' => true, 'administrator_opt_in_respected' => true, 'live_websites_contacted' => false ] ) );
+file_put_contents( '/reports/github-updates.json', wp_json_encode( [ 'checks' => $checks, 'source' => U\REPOSITORY, 'synthetic_future_version' => '__FUTURE_VERSION__', 'native_core_discovery' => true, 'native_auto_update_control_without_release_data' => true, 'existing_policy_and_preferences_preserved' => true, 'cached_settings_load' => true, 'installed_version_badge' => true, 'immediate_check' => true, 'immediate_check_only' => true, 'result_notice_at_top' => true, 'all_result_notice_types_verified' => true, 'immediate_failure_preserves_offers' => true, 'native_upgrade_completed' => true, 'tampered_package_rejected' => true, 'settings_and_grants_preserved' => true, 'administrator_opt_in_respected' => true, 'live_websites_contacted' => false ] ) );
 echo 'WORDPRESS GITHUB UPDATER CHECKS PASSED ' . $checks;

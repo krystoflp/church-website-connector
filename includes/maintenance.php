@@ -204,7 +204,34 @@ function format_time( int $timestamp ): string {
 	return $timestamp > 0 ? wp_date( 'Y-m-d H:i:s T', $timestamp ) : __( 'Not recorded yet', 'church-website-connector' );
 }
 
-/** Compact summary: local reads only; opening settings never starts an update lookup. */
+/** Describe the installed version using local release evidence, without starting another check. */
+function installed_version_status( array $updates ): array {
+	$latest = $updates['latest'];
+	$newer  = null !== $latest && version_compare( $latest, Connector\VERSION, '>' );
+	$fresh  = 'success' === $updates['result'] && $updates['last_success'] > time() - Updates\CACHE_HOURS * HOUR_IN_SECONDS;
+
+	if ( $fresh && null !== $latest ) {
+		if ( $newer ) {
+			/* translators: 1: Installed connector version, 2: latest stable version. */
+			return array( 'yellow', __( 'Update available', 'church-website-connector' ), sprintf( __( '%1$s installed. The latest stable release is %2$s.', 'church-website-connector' ), Connector\VERSION, $latest ) );
+		}
+		$label = version_compare( Connector\VERSION, $latest, '>' ) ? __( 'Ahead of latest release', 'church-website-connector' ) : __( 'Up to date', 'church-website-connector' );
+		return array( 'green', $label, Connector\VERSION );
+	}
+
+	if ( $newer ) {
+		/* translators: 1: Installed connector version, 2: last known stable version. */
+		return array( 'yellow', __( 'Check needed', 'church-website-connector' ), sprintf( __( '%1$s installed. The last successful check found version %2$s.', 'church-website-connector' ), Connector\VERSION, $latest ) );
+	}
+	$offered = Updates\offered_version();
+	if ( '' !== $offered ) {
+		/* translators: 1: Installed connector version, 2: version listed by WordPress. */
+		return array( 'yellow', __( 'Update listed', 'church-website-connector' ), sprintf( __( '%1$s installed. WordPress lists version %2$s in Installed Plugins.', 'church-website-connector' ), Connector\VERSION, $offered ) );
+	}
+	return array( 'yellow', __( 'Latest version unconfirmed', 'church-website-connector' ), Connector\VERSION );
+}
+
+/** Render the compact summary using the local results available for this request. */
 function render_summary( array $status ): void {
 	if ( is_wp_error( Connector\status_permission() ) ) {
 		return;
@@ -212,9 +239,11 @@ function render_summary( array $status ): void {
 	$updates = update_status();
 	$result  = match ( $updates['result'] ) {
 		'success' => __( 'Successful', 'church-website-connector' ), 'failed' => __( 'Failed; last successful check shown below', 'church-website-connector' ), default => __( 'Not checked yet', 'church-website-connector' ) };
+	$installed_row = __( 'Installed connector', 'church-website-connector' );
+	list( $installed_level, $installed_badge, $installed_text ) = installed_version_status( $updates );
 	$rows = array(
-		__( 'Installed connector', 'church-website-connector' ) => Connector\VERSION,
-		__( 'Latest known stable release', 'church-website-connector' ) => $updates['latest'] ?? __( 'Not checked yet', 'church-website-connector' ),
+		$installed_row => $installed_text,
+		__( 'Latest known stable release', 'church-website-connector' ) => $updates['latest'] ?? ( 'failed' === $updates['result'] ? __( 'Unavailable', 'church-website-connector' ) : __( 'Not checked yet', 'church-website-connector' ) ),
 		__( 'Connector automatic updates', 'church-website-connector' ) => auto_status( Updates\plugin_file() )['message'],
 		__( 'MCP Adapter automatic updates', 'church-website-connector' ) => auto_status( Connector\AdapterSetup\PLUGIN_FILE )['message'],
 		__( 'GeneratePress AI automatic updates', 'church-website-connector' ) => auto_status( Connector\GeneratePressSetup\PLUGIN_FILE )['message'],
@@ -229,6 +258,7 @@ function render_summary( array $status ): void {
 		return ! $auto['available'] || 'disabled' === $auto['policy'] ? 'red' : ( $auto['selected'] || 'enabled' === $auto['policy'] ? 'green' : 'yellow' );
 	};
 	$levels     = array(
+		$installed_row => $installed_level,
 		__( 'Latest known stable release', 'church-website-connector' ) => $updates['latest'] ? 'green' : 'yellow',
 		__( 'Connector automatic updates', 'church-website-connector' ) => $auto_level( Updates\plugin_file() ),
 		__( 'MCP Adapter automatic updates', 'church-website-connector' ) => $auto_level( Connector\AdapterSetup\PLUGIN_FILE ),
@@ -238,9 +268,14 @@ function render_summary( array $status ): void {
 		__( 'WordPress and plugin tools through MCP', 'church-website-connector' ) => $status['primary_connection']['level'],
 		__( 'MCP Adapter setup', 'church-website-connector' ) => Connector\AdapterSetup\status()['level'],
 	);
+	$badges     = array(
+		'green'  => __( 'OK', 'church-website-connector' ),
+		'yellow' => __( 'Review', 'church-website-connector' ),
+	);
 	foreach ( $rows as $label => $value ) {
 		$level = $levels[ $label ] ?? 'green';
-		echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . Connector\Status\badge( $level, 'green' === $level ? __( 'OK', 'church-website-connector' ) : ( 'yellow' === $level ? __( 'Review', 'church-website-connector' ) : '' ) ) . '<span' . ( __( 'MCP Adapter setup', 'church-website-connector' ) === $label ? ' data-cwc-adapter-message' : '' ) . '>' . esc_html( $value ) . '</span></td></tr>';
+		$badge = $installed_row === $label ? $installed_badge : ( $badges[ $level ] ?? '' );
+		echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . Connector\Status\badge( $level, $badge ) . '<span' . ( __( 'MCP Adapter setup', 'church-website-connector' ) === $label ? ' data-cwc-adapter-message' : '' ) . '>' . esc_html( $value ) . '</span></td></tr>';
 	}
 	echo '</tbody></table><p>' . esc_html__( 'Automatic updates follow WordPress scheduling, compatibility checks and hosting policy. Connection status is local readiness, not proof of client sign-in.', 'church-website-connector' ) . '</p>';
 	$issues = array_filter( Connector\dependency_issues(), static fn( array $issue ): bool => 'info' !== ( $issue['level'] ?? 'warning' ) );
