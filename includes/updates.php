@@ -36,11 +36,29 @@ function fetch_json( string $url, bool $api = false ) {
 			'headers'             => array( 'Accept' => $api ? 'application/vnd.github+json' : 'application/json' ),
 		)
 	);
-	if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) !== 200 ) {
+	if ( is_wp_error( $response ) ) {
+		return $response;
+	}
+	$status = (int) wp_remote_retrieve_response_code( $response );
+	if ( 429 === $status || $status >= 500 ) {
+		return new \WP_Error( 'church_connector_release_transport', 'The release service is temporarily unavailable.' );
+	}
+	if ( 200 !== $status ) {
 		return false;
 	}
 	$decoded = json_decode( wp_remote_retrieve_body( $response ), true );
 	return is_array( $decoded ) ? $decoded : false;
+}
+
+function release_failure( string $version, $cause = false ): array {
+	if ( '' === $version ) {
+		if ( is_wp_error( $cause ) ) {
+			set_transient( CACHE . 'latest_unavailable', true, 15 * MINUTE_IN_SECONDS );
+		} else {
+			delete_transient( CACHE . 'last_verified' );
+		}
+	}
+	return array();
 }
 
 function release( string $version = '' ): array {
@@ -54,6 +72,7 @@ function release( string $version = '' ): array {
 	}
 	if ( '' === $version ) {
 		record_check( false );
+		delete_transient( CACHE . 'latest_unavailable' );
 	}
 	// Cache failures briefly too; a GitHub outage must not repeatedly delay requests.
 	set_transient( $key, array(), 15 * MINUTE_IN_SECONDS );
@@ -61,12 +80,12 @@ function release( string $version = '' ): array {
 	if ( ! is_array( $data ) || ( $data['draft'] ?? true ) !== false || ( $data['prerelease'] ?? true ) !== false
 		|| ! is_string( $data['tag_name'] ?? null ) || ! str_starts_with( $data['tag_name'], 'v' )
 		|| ! is_string( $data['published_at'] ?? null ) || strtotime( $data['published_at'] ) === false ) {
-		return array();
+		return release_failure( $version, $data );
 	}
 	$found_version = substr( $data['tag_name'], 1 );
 	if ( ! stable_version( $found_version ) || ( '' !== $version && $version !== $found_version )
 		|| ( $data['html_url'] ?? '' ) !== REPOSITORY . '/releases/tag/v' . $found_version ) {
-		return array();
+		return release_failure( $version );
 	}
 	$assets = array();
 	foreach ( (array) ( $data['assets'] ?? array() ) as $asset ) {
@@ -78,29 +97,29 @@ function release( string $version = '' ): array {
 				// Duplicate, incomplete or redirected-to-another-repository assets are rejected.
 				if ( isset( $assets[ $extension ] ) || ( $asset['state'] ?? '' ) !== 'uploaded'
 					|| ( $asset['browser_download_url'] ?? '' ) !== asset_url( $found_version, $extension ) ) {
-					return array();
+					return release_failure( $version );
 				}
 				$assets[ $extension ] = $asset;
 			}
 		}
 	}
 	if ( ! isset( $assets['zip'], $assets['json'] ) ) {
-		return array();
+		return release_failure( $version );
 	}
 	$metadata = fetch_json( asset_url( $found_version, 'json' ) );
 	if ( ! is_array( $metadata ) || ( $metadata['version'] ?? '' ) !== $found_version
 		|| ! is_string( $metadata['sha256'] ?? null ) || preg_match( '/\A[a-f0-9]{64}\z/', $metadata['sha256'] ) !== 1 ) {
-		return array();
+		return release_failure( $version, $metadata );
 	}
 	foreach ( array( 'requires', 'requires_php', 'tested' ) as $field ) {
 		if ( ! is_string( $metadata[ $field ] ?? null ) || preg_match( '/\A[0-9]+\.[0-9]+(?:\.[0-9]+)?\z/', $metadata[ $field ] ) !== 1 ) {
-			return array();
+			return release_failure( $version );
 		}
 	}
 	// Recent GitHub uploads also supply a digest; require agreement when supplied.
 	$github_digest = $assets['zip']['digest'] ?? null;
 	if ( null !== $github_digest && 'sha256:' . $metadata['sha256'] !== $github_digest ) {
-		return array();
+		return release_failure( $version );
 	}
 	$result = array(
 		'version'      => $found_version,
@@ -115,6 +134,7 @@ function release( string $version = '' ): array {
 	);
 	if ( '' === $version ) {
 		record_check( true, $found_version );
+		set_transient( CACHE . 'last_verified', $result, 24 * HOUR_IN_SECONDS );
 	}
 	set_transient( CACHE . $found_version, $result, 12 * HOUR_IN_SECONDS );
 	set_transient( $key, $result, 12 * HOUR_IN_SECONDS );
@@ -157,6 +177,14 @@ function update_offer( $update, array $plugin_data, string $file, array $locales
 		return $update;
 	}
 	$latest = release();
+	if ( ! $latest && get_transient( CACHE . 'latest_unavailable' ) ) {
+		$previous = get_transient( CACHE . 'last_verified' );
+		$history  = get_option( CHECK_STATUS, array() );
+		if ( is_array( $previous ) && ( $history['last_success'] ?? 0 ) > time() - 24 * HOUR_IN_SECONDS
+			&& ( $history['latest'] ?? null ) === $previous['version'] ) {
+			$latest = $previous;
+		}
+	}
 	if ( ! $latest ) {
 		return false;
 	}
@@ -204,18 +232,40 @@ function plugin_information( $result, string $action, $args ) {
 	);
 }
 
+/** Return the version currently offered for a managed upgrade of this plugin. */
+function offered_version(): string {
+	$updates = get_site_transient( 'update_plugins' );
+	$offer   = $updates->response[ plugin_file() ] ?? null;
+	$version = $offer->new_version ?? '';
+	return REPOSITORY === ( $offer->id ?? null ) && stable_version( $version ) && version_compare( $version, \ChurchWebsiteConnector\VERSION, '>' ) ? $version : '';
+}
+
 /** Check the exact release's SHA-256 before giving WordPress a package to install. */
 function verified_download( $reply, string $package, $upgrader, array $extra ) {
-	$prefix = REPOSITORY . '/releases/download/';
-	if ( ! str_starts_with( $package, $prefix ) || is_wp_error( $reply ) ) {
+	$target   = $extra['plugin'] ?? null;
+	$official = str_starts_with( $package, REPOSITORY . '/releases/download/' );
+	if ( is_wp_error( $reply ) || ( null !== $target && plugin_file() !== $target ) || ( ! $official && null === $target ) ) {
 		return $reply;
 	}
-	$pattern = '~\A' . preg_quote( $prefix, '~' ) . 'v([0-9]+\.[0-9]+\.[0-9]+)/' . SLUG . '-\1\.zip\z~';
-	if ( preg_match( $pattern, $package, $match ) !== 1 || ! stable_version( $match[1] ) ) {
-		return new \WP_Error( 'church_connector_package_url', 'The connector update package address is invalid.' );
+	if ( $official ) {
+		$pattern = '~\A' . preg_quote( REPOSITORY . '/releases/download/', '~' ) . 'v([0-9]+\.[0-9]+\.[0-9]+)/' . SLUG . '-\1\.zip\z~';
+		if ( 1 !== preg_match( $pattern, $package, $match ) || ! stable_version( $match[1] ) ) {
+			return new \WP_Error( 'church_connector_package_url', 'The connector update package address is invalid.' );
+		}
+		$version = $match[1];
 	}
-	$release = release( $match[1] );
-	if ( ! $release || $release['package'] !== $package ) {
+	if ( null !== $target ) {
+		$offered = offered_version();
+		if ( '' === $offered || ( $official && $version !== $offered ) ) {
+			return new \WP_Error( 'church_connector_package_release', 'Refresh connector updates. The package must match the newer version offered by WordPress.' );
+		}
+		$version = $offered;
+	}
+	if ( version_compare( $version, \ChurchWebsiteConnector\VERSION, '<' ) ) {
+		return new \WP_Error( 'church_connector_package_release', 'The connector updater cannot install an older release.' );
+	}
+	$release = release( $version );
+	if ( ( $release['version'] ?? '' ) !== $version || asset_url( $version, 'zip' ) !== ( $release['package'] ?? '' ) ) {
 		return new \WP_Error( 'church_connector_package_release', 'The connector update does not have a complete published release.' );
 	}
 	if ( ! compatible( $release ) ) {
@@ -224,8 +274,13 @@ function verified_download( $reply, string $package, $upgrader, array $extra ) {
 	if ( ! function_exists( 'download_url' ) ) {
 		require_once ABSPATH . 'wp-admin/includes/file.php';
 	}
-	$downloaded_here = false === $reply;
-	$file            = $downloaded_here ? download_url( $package ) : $reply;
+	// WordPress also accepts a local package path from a managed update cache.
+	$local_package   = false === $reply && ! str_contains( $package, '://' ) && is_file( $package );
+	$downloaded_here = false === $reply && ! $local_package;
+	$file            = $local_package ? $package : $reply;
+	if ( $downloaded_here ) {
+		$file = download_url( $package );
+	}
 	if ( is_wp_error( $file ) ) {
 		return $file;
 	}
@@ -237,6 +292,22 @@ function verified_download( $reply, string $package, $upgrader, array $extra ) {
 		return new \WP_Error( 'church_connector_package_integrity', 'The connector update failed its integrity check and was not installed.' );
 	}
 	return $file;
+}
+
+/** Check the unpacked header before core replaces the installed directory. */
+function verified_source( $source, $remote_source, $upgrader, array $extra ) {
+	if ( is_wp_error( $source ) || ( $extra['plugin'] ?? null ) !== plugin_file() || 'update' !== ( $extra['action'] ?? '' ) ) {
+		return $source;
+	}
+	global $wp_filesystem;
+	$version = offered_version();
+	$file    = trailingslashit( $source ) . SLUG . '.php';
+	$header  = $wp_filesystem->is_file( $file ) ? $wp_filesystem->get_contents( $file ) : false;
+	if ( '' === $version || ! is_string( $header ) || ! preg_match( '/^(?:[ \t]*<\?php)?[ \t\/*#@]*Version:(.*)$/mi', str_replace( "\r", "\n", substr( $header, 0, 8192 ) ), $match )
+		|| _cleanup_header_comment( $match[1] ) !== $version ) {
+		return new \WP_Error( 'church_connector_package_version', 'The unpacked connector does not match the version offered by WordPress. The installed plugin was preserved.' );
+	}
+	return $source;
 }
 
 /** Check immediately from the administrator's nonce-protected form; never install. */
@@ -282,6 +353,19 @@ function check_now(): array|\WP_Error {
 		$updates->no_update[ $file ] = $offer;
 	}
 	set_site_transient( 'update_plugins', $updates );
+	$stored   = get_site_transient( 'update_plugins' );
+	$expected = $newer ? 'response' : 'no_update';
+	$opposite = $newer ? 'no_update' : 'response';
+	$actual   = $stored->{$expected}[ $file ] ?? null;
+	if ( ( $actual->new_version ?? null ) !== $latest['version'] || ( $actual->id ?? null ) !== REPOSITORY
+		|| ( $actual->disable_autoupdate ?? null ) !== ! compatible( $latest ) || ! is_string( $actual->package ?? null ) || '' === $actual->package
+		|| ( str_starts_with( $actual->package, REPOSITORY . '/releases/download/' ) && $actual->package !== $latest['package'] )
+		|| isset( $stored->{$opposite}[ $file ] ) ) {
+		return array(
+			'status'  => 'offer_not_saved',
+			'version' => $latest['version'],
+		);
+	}
 
 	$status = $newer ? ( compatible( $latest ) ? 'available' : 'incompatible' ) : 'current';
 	if ( version_compare( $latest['version'], \ChurchWebsiteConnector\VERSION, '<' ) ) {
@@ -334,6 +418,11 @@ function render_notice(): void {
 				/* translators: %s: Latest connector version. */
 				$message = sprintf( __( 'Your installed connector is newer than the latest published stable release (%s). No downgrade is offered.', 'church-website-connector' ), $version );
 				break;
+			case 'offer_not_saved':
+				/* translators: %s: Latest connector version. */
+				$message = sprintf( __( 'GitHub reports version %s. WordPress could not retain the matching result in Installed Plugins. Check again before attempting an update.', 'church-website-connector' ), $version );
+				$type    = 'warning';
+				break;
 			case 'failed':
 				$message = __( 'The update check failed. GitHub did not return a complete, valid release. Try again later. The previous WordPress update information has been kept.', 'church-website-connector' );
 				$type    = 'error';
@@ -363,4 +452,5 @@ add_action( 'admin_post_church_connector_check_updates', __NAMESPACE__ . '\\hand
 add_filter( 'all_plugins', __NAMESPACE__ . '\\supported_plugin' );
 add_filter( 'update_plugins_github.com', __NAMESPACE__ . '\\update_offer', 10, 4 );
 add_filter( 'plugins_api', __NAMESPACE__ . '\\plugin_information', 10, 3 );
-add_filter( 'upgrader_pre_download', __NAMESPACE__ . '\\verified_download', 10, 4 );
+add_filter( 'upgrader_pre_download', __NAMESPACE__ . '\\verified_download', PHP_INT_MAX, 4 );
+add_filter( 'upgrader_source_selection', __NAMESPACE__ . '\\verified_source', PHP_INT_MAX, 4 );

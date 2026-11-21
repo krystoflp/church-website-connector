@@ -9,7 +9,7 @@ use ChurchWebsiteConnector\RestTools;
 defined( 'ABSPATH' ) || exit;
 
 /** Return byte ranges in document order, including File blocks inside groups. */
-function ranges( string $content ): array|\WP_Error {
+function ranges( string $content, ?array &$references = null ): array|\WP_Error {
 	if ( strlen( $content ) > 1024 * 1024 ) {
 		return RestTools\error( 'post_size', 'This post exceeds the 1 MiB review limit.' );
 	}
@@ -26,6 +26,9 @@ function ranges( string $content ): array|\WP_Error {
 			break;
 		}
 		$parser->offset = $start + $length;
+		if ( null !== $references && 'core/block' === $name && in_array( $type, array( 'void-block', 'block-opener' ), true ) ) {
+			$references[] = empty( $attrs['content'] ) && empty( $attrs['overrides'] ) ? ( $attrs['ref'] ?? null ) : false;
+		}
 		if ( 'void-block' === $type && 'core/file' !== $name ) {
 			continue;
 		}
@@ -51,6 +54,82 @@ function ranges( string $content ): array|\WP_Error {
 	}
 	usort( $files, static fn( $left, $right ) => $left['start'] <=> $right['start'] );
 	return $files;
+}
+
+/** Follow saved, publicly renderable synced patterns without executing dynamic blocks. */
+function content_files( string $content ): array|\WP_Error {
+	$references = array();
+	$ranges     = ranges( $content, $references );
+	if ( is_wp_error( $ranges ) ) {
+		return $ranges;
+	}
+	$patterns = array();
+	$bytes    = strlen( $content );
+	$count    = count( $ranges );
+	$result   = collect_patterns( $references, array(), $patterns, $bytes, $count );
+	return array(
+		'ranges'   => $ranges,
+		'patterns' => is_wp_error( $result ) ? $result : $patterns,
+	);
+}
+
+function collect_patterns( array $references, array $ancestors, array &$patterns, int &$bytes, int &$count ): true|\WP_Error {
+	if ( count( $references ) > 50 ) {
+		return RestTools\error( 'pattern_review', 'This content contains more than 50 synced pattern references. Review it in WordPress before publication.', 409 );
+	}
+	foreach ( $references as $id ) {
+		if ( false === $id ) {
+			return RestTools\error( 'pattern_review', 'This synced pattern has instance-specific content overrides. Review its rendered content in WordPress before publication.', 409 );
+		}
+		if ( ! is_int( $id ) || $id < 1 || isset( $ancestors[ $id ] ) || count( $ancestors ) >= 8 ) {
+			return RestTools\error( 'pattern_review', 'A synced pattern reference is invalid, circular or too deeply nested. Review it in WordPress before publication.', 409 );
+		}
+		if ( isset( $patterns[ $id ] ) ) {
+			continue;
+		}
+		wp_cache_delete( $id, 'posts' );
+		$post = get_post( $id );
+		if ( ! $post || 'wp_block' !== $post->post_type || 'publish' !== $post->post_status || '' !== $post->post_password || ! current_user_can( 'read_post', $id ) ) {
+			return RestTools\error( 'pattern_review', 'A referenced synced pattern is unavailable for review. Inspect the pattern in WordPress before publication.', 409 );
+		}
+		$bytes += strlen( $post->post_content );
+		if ( $bytes > MB_IN_BYTES || count( $patterns ) >= 50 ) {
+			return RestTools\error( 'pattern_review', 'The post and its synced patterns exceed the bounded review. Inspect the patterns in WordPress before publication.', 409 );
+		}
+		$nested = array();
+		$files  = ranges( $post->post_content, $nested );
+		if ( is_wp_error( $files ) || $count + count( $files ) > 50 ) {
+			return RestTools\error( 'pattern_review', 'The referenced patterns contain unreviewable File blocks or exceed the combined 50-block limit. Review them in WordPress.', 409 );
+		}
+		$count          += count( $files );
+		$patterns[ $id ] = array(
+			'id'           => $id,
+			'title'        => $post->post_title,
+			'content_hash' => hash( 'sha256', $post->post_content ),
+			'ranges'       => $files,
+		);
+
+		$result = collect_patterns( $nested, $ancestors + array( $id => true ), $patterns, $bytes, $count );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+	}
+	return true;
+}
+
+/** Direct File block indexes stay local to the page or the named synced pattern. */
+function describe_content( array $files ): array {
+	$review = array( 'file_blocks' => describe_all( $files['ranges'] ) );
+	if ( is_wp_error( $files['patterns'] ) ) {
+		$review['pattern_review_issue'] = $files['patterns']->get_error_message();
+	} else {
+		foreach ( $files['patterns'] as $pattern ) {
+			$pattern['file_blocks'] = describe_all( $pattern['ranges'] );
+			unset( $pattern['ranges'] );
+			$review['synced_patterns'][] = $pattern;
+		}
+	}
+	return $review;
 }
 
 /** URL metadata is displayed as data. No attachment URL is fetched by these tools. */
@@ -94,6 +173,108 @@ function describe( array $file, int $number ): array {
 		}
 	}
 	return $info;
+}
+
+function describe_all( array $ranges ): array {
+	$files = array();
+	foreach ( $ranges as $index => $file ) {
+		$files[] = describe( $file, $index + 1 );
+	}
+	return $files;
+}
+
+/** Recognise direct links to the verified file, including site-root paths and PDF viewer fragments. */
+function matches_pdf_url( mixed $target, string $url ): bool {
+	if ( ! is_string( $target ) ) {
+		return false;
+	}
+	$address = explode( '#', $target, 2 )[0];
+	if ( $address === $url ) {
+		return true;
+	}
+	$parts = wp_parse_url( $url );
+	$path  = $parts['path'];
+	if ( ! str_ends_with( $address, $path ) ) {
+		return false;
+	}
+	// Compare origins independently of the case-sensitive file path. Accept only
+	// the reviewed host, scheme and their default port, or a site-root path.
+	$origin = strtolower( substr( $address, 0, -strlen( $path ) ) );
+	if ( '' === $origin ) {
+		return ! str_starts_with( $address, '//' );
+	}
+	$host   = '//' . strtolower( $parts['host'] );
+	$scheme = strtolower( $parts['scheme'] );
+	$port   = 'https' === $scheme ? ':443' : ':80';
+	return in_array( $origin, array( $host, $host . $port, $scheme . ':' . $host, $scheme . ':' . $host . $port ), true );
+}
+
+/** Display filenames only, without URL credentials, query strings or viewer fragments. */
+function linked_filename( mixed $url ): string {
+	if ( ! is_string( $url ) || '' === $url ) {
+		return '';
+	}
+	$scheme = wp_parse_url( $url, PHP_URL_SCHEME );
+	if ( $scheme && ! in_array( strtolower( $scheme ), array( 'https', 'http' ), true ) ) {
+		return '';
+	}
+	$path = wp_parse_url( $url, PHP_URL_PATH );
+	return is_string( $path ) ? sanitize_text_field( wp_basename( rawurldecode( $path ) ) ) : '';
+}
+
+/** Verify every saved destination, even when a later link in the same block is correct. */
+function publication_targets( array $file, int $number, string $url ): array|\WP_Error {
+	$mismatch = static function ( $role, $target = null ) use ( $number, $url ) {
+		$expected = linked_filename( $url );
+		$linked   = linked_filename( $target );
+		$message  = sprintf( 'In File block %d, %s. The saved destination is %s. The Media Library PDF is %s.', $number, $role, $linked ? $linked : 'unidentified', $expected );
+		return RestTools\review_error(
+			'church_connector_rest_pdf_target',
+			sprintf( 'File block %d needs review. Read the post and prepare a separate replacement for the intended attachment.', $number ),
+			$message,
+			array(
+				'status'            => 409,
+				'file_block'        => $number,
+				'linked_filename'   => $linked,
+				'expected_filename' => $expected,
+			)
+		);
+	};
+	foreach ( array( 'href', 'textLinkHref' ) as $attribute ) {
+		if ( array_key_exists( $attribute, $file['attrs'] ) && ! matches_pdf_url( $file['attrs'][ $attribute ], $url ) ) {
+			return $mismatch( 'the saved File block URL differs from its PDF attachment', $file['attrs'][ $attribute ] );
+		}
+	}
+	$html    = new \WP_HTML_Tag_Processor( $file['html'] );
+	$targets = array();
+	while ( $html->next_tag() ) {
+		$tag = $html->get_tag();
+		if ( 'A' === $tag ) {
+			$key       = null === $html->get_attribute( 'download' ) ? 'link_url' : 'download_url';
+			$attribute = 'href';
+		} elseif ( in_array( $tag, array( 'OBJECT', 'EMBED', 'IFRAME' ), true ) ) {
+			$key       = 'embed_url';
+			$attribute = 'OBJECT' === $tag ? 'data' : 'src';
+			if ( 'IFRAME' === $tag && null !== $html->get_attribute( 'srcdoc' ) ) {
+				return $mismatch( 'the embedded preview supplies its own content' );
+			}
+		} else {
+			continue;
+		}
+		if ( ! matches_pdf_url( $html->get_attribute( $attribute ), $url ) ) {
+			$labels = array(
+				'link_url'     => 'the file link does not point directly to its PDF attachment',
+				'download_url' => 'the download button does not point directly to its PDF attachment',
+				'embed_url'    => 'the embedded preview does not point directly to its PDF attachment',
+			);
+			return $mismatch( $labels[ $key ], $html->get_attribute( $attribute ) );
+		}
+		$targets[ $key ] = $url;
+	}
+	if ( ! $targets || $html->paused_at_incomplete_token() ) {
+		return $mismatch( 'the saved markup has no verifiable destination or is incomplete' );
+	}
+	return $targets;
 }
 
 /** Resolve a same-origin, readable PDF attachment using WordPress Media Library. */

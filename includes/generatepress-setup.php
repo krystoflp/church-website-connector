@@ -51,19 +51,31 @@ function finish( string $status, string $message, string $version = '' ): array 
 }
 
 /** Inspect plugin headers only; status views must not contact the licence server. */
-function status(): array {
+function status( ?bool $licence_active = null ): array {
 	if ( ! function_exists( 'get_plugins' ) ) {
 		require_once ABSPATH . 'wp-admin/includes/plugin.php';
 	}
-	$plugins = get_plugins();
-	$version = $plugins[ PLUGIN_FILE ]['Version'] ?? '';
-	$saved   = get_option( STATE, array() );
+	$plugins   = get_plugins();
+	$version   = $plugins[ PLUGIN_FILE ]['Version'] ?? '';
+	$installed = isset( $plugins[ PLUGIN_FILE ] );
+	$active    = $installed && is_plugin_active( PLUGIN_FILE );
+	$saved     = get_option( STATE, array() );
+	$same      = is_array( $saved ) && ( $saved['site'] ?? null ) === Connector\current_identity();
+	$message   = $same ? (string) ( $saved['message'] ?? '' ) : __( 'Ready to install. Enter your GeneratePress One licence key, then choose Install and activate.', 'church-website-connector' );
+	if ( $same && 'complete' === ( $saved['status'] ?? '' ) ) {
+		if ( ! $installed ) {
+			$message = __( 'GeneratePress AI is currently missing. Install it to resume setup.', 'church-website-connector' );
+		} elseif ( ! $active ) {
+			$message = __( 'GeneratePress AI is installed but currently inactive.', 'church-website-connector' );
+		} elseif ( true !== $licence_active ) {
+			$message = __( 'GeneratePress AI is active. Check the current licence status in its settings.', 'church-website-connector' );
+		}
+	}
 	return array(
-		'installed' => isset( $plugins[ PLUGIN_FILE ] ),
-		'active'    => is_plugin_active( PLUGIN_FILE ),
+		'installed' => $installed,
+		'active'    => $active,
 		'version'   => Connector\Maintenance\version( $version ),
-		'message'   => is_array( $saved ) && ( $saved['site'] ?? null ) === Connector\current_identity()
-			? (string) ( $saved['message'] ?? '' ) : __( 'Ready to install. Enter your GeneratePress One licence key, then choose Install and activate.', 'church-website-connector' ),
+		'message'   => $message,
 	);
 }
 
@@ -336,7 +348,7 @@ function run( string $key ) {
 		if ( ! supported_version( $version ) || is_wp_error( validate_plugin_requirements( PLUGIN_FILE ) ) ) {
 			return finish( 'failed', __( 'The installed GeneratePress AI version needs a compatibility review before this setup can continue.', 'church-website-connector' ), $version );
 		}
-		if ( ! is_plugin_active( PLUGIN_FILE ) && is_wp_error( activate_plugin( PLUGIN_FILE, '', false, false ) ) ) {
+		if ( ! is_plugin_active( PLUGIN_FILE ) && ( is_wp_error( activate_plugin( PLUGIN_FILE, '', false, false ) ) || ! is_plugin_active( PLUGIN_FILE ) ) ) {
 			return finish( 'failed', __( 'GeneratePress AI is installed but could not be activated. Review Installed Plugins.', 'church-website-connector' ), $version );
 		}
 		if ( ! class_exists( '\GeneratePress_AI_License' ) ) {
@@ -433,7 +445,7 @@ function render_callout( array $status ): void {
 	if ( $dependencies['generatepress_ai_version'] && true === $dependencies['generatepress_license_cached_active'] ) {
 		return;
 	}
-	$state = status();
+	$state = status( $dependencies['generatepress_license_cached_active'] );
 	echo '<section id="cwc-gp-setup" class="notice notice-warning inline" aria-labelledby="cwc-gp-setup-title"><h2 id="cwc-gp-setup-title">' . esc_html__( 'Finish GeneratePress AI setup', 'church-website-connector' ) . '</h2>';
 	echo '<p>' . esc_html__( 'Fill the licence key using 1Password in your browser, or paste it here. Then install and activate GeneratePress AI in one step.', 'church-website-connector' ) . '</p>';
 	if ( owner_allowed( get_current_user_id() ) ) {

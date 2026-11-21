@@ -104,6 +104,7 @@ function snapshot( string $kind, int $id ): array|\WP_Error {
 		return $allowed;
 	}
 	wp_cache_delete( $id, 'posts' );
+	wp_cache_delete( $id, 'post_meta' );
 	$post = get_post( $id );
 	if ( ! $post || TYPES[ $kind ] !== $post->post_type || ! in_array( $post->post_status, array( 'draft', 'publish', 'trash' ), true ) || ! current_user_can( 'edit_post', $id ) ) {
 		return RestTools\error( 'design_item', 'Choose an exact editable item of the requested kind.', 404 );
@@ -412,6 +413,7 @@ function plan( string $operation, array $state, array $changes ): array|\WP_Erro
 	}
 	$body      = array();
 	$meta      = array();
+	$reviewed  = array();
 	$impact    = null;
 	$method    = 'POST';
 	$rest_base = match ( $kind ) {
@@ -437,7 +439,8 @@ function plan( string $operation, array $state, array $changes ): array|\WP_Erro
 		if ( is_wp_error( $normalized ) ) {
 			return $normalized;
 		}
-		$key = Elements\RULES[ $group ];
+		$key                       = Elements\RULES[ $group ];
+		$reviewed['previous_meta'] = get_post_meta( $id, $key, false );
 		if ( (array) get_post_meta( $id, $key, true ) === $normalized ) {
 			return RestTools\error( 'unchanged', 'This rule group already has that value.', 409 );
 		}
@@ -482,6 +485,19 @@ function plan( string $operation, array $state, array $changes ): array|\WP_Erro
 		if ( $publish && 'element' === $kind && empty( $item['details']['locations'] ) ) {
 			return RestTools\error( 'element_rules', 'Set and review display locations before publishing this Block Element.', 409 );
 		}
+		if ( $publish && 'element' === $kind ) {
+			$placement = $item['details'];
+			foreach ( array( '_generate_hook', '_generate_custom_hook', '_generate_hook_priority', '_generate_post_meta_location', '_generate_post_loop_item_display' ) as $key ) {
+				$placement[ $key ] = get_post_meta( $id, $key, true );
+			}
+			if ( ! empty( $placement['partial_rules'] ) || strlen( $post->post_content ) > 16000 || strlen( wp_json_encode( $placement ) ) > 16000 ) {
+				return RestTools\error( 'design_publication_review', 'Review and publish this Element in WordPress. Its full content or placement exceeds the connector review.', 409 );
+			}
+			$reviewed['publication'] = array(
+				'content'   => $post->post_content,
+				'placement' => $placement,
+			);
+		}
 		$body['status'] = $publish ? 'publish' : 'draft';
 	} else {
 		return RestTools\error( 'design_operation', 'Choose an operation available for this item and your WordPress permissions.', 403 );
@@ -503,10 +519,10 @@ function plan( string $operation, array $state, array $changes ): array|\WP_Erro
 		'body'   => $body,
 		'meta'   => $meta,
 		'impact' => $impact,
-	);
+	) + $reviewed;
 }
 
-function preview( $input ): array|\WP_Error {
+function preview( $input, ?array $replaces = null ): array|\WP_Error {
 	$state = target( $input, array( 'state_hash', 'operation', 'changes' ) );
 	if ( is_wp_error( $state ) ) {
 		return $state;
@@ -524,6 +540,19 @@ function preview( $input ): array|\WP_Error {
 	if ( is_wp_error( $plan ) ) {
 		return $plan;
 	}
+	$publication = array();
+	$body_guard  = array();
+	if ( isset( $plan['publication'] ) ) {
+		if ( null !== $replaces && ! isset( $replaces['publication_content'] ) ) {
+			return RestTools\error( 'design_publication_review', 'The previous Element body is unavailable. Read it again and request a new publication review.', 409 );
+		}
+		$content     = $plan['publication']['content'];
+		$publication = array( 'publication' => $plan['publication'] );
+		$body_guard  = array( 'publication_content' => $content );
+		if ( null !== $replaces && $replaces['publication_content'] !== $content ) {
+			$publication['publication']['previous_content'] = $replaces['publication_content'];
+		}
+	}
 	$saved = RestTools\save_preview(
 		array(
 			'operation'  => 'design_' . $operation,
@@ -532,7 +561,8 @@ function preview( $input ): array|\WP_Error {
 			'state_hash' => $item['state_hash'],
 			'changes'    => $changes,
 			'review'     => fingerprint( $plan ),
-		)
+		) + $body_guard,
+		$replaces
 	);
 	return is_wp_error( $saved ) ? $saved : array(
 		'site_url'  => Connector\bound_site(),
@@ -541,7 +571,70 @@ function preview( $input ): array|\WP_Error {
 		'proposed'  => 'update_form_messages' === $operation ? $plan['impact'] : $plan['body'] + $plan['meta'],
 		'usage'     => 'update_form_messages' === $operation ? null : $plan['impact'],
 		'message'   => 'Show the exact item, proposed change and known usage before asking for approval. Display conditions can change what appears on public pages.',
-	) + $saved;
+	) + $publication + $saved;
+}
+
+/** Compare the native metadata row under a write lock, including a not-yet-created rule group. */
+function write_reviewed_meta( int $id, string $key, array $previous, array $value ): bool {
+	global $wpdb;
+	if ( count( $previous ) > 1 ) {
+		return false;
+	}
+	if ( ! ( $wpdb instanceof \WP_SQLite_DB ) ) {
+		$engine = $wpdb->get_var( $wpdb->prepare( 'SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s', $wpdb->postmeta ) );
+		if ( ! in_array( $engine, array( 'InnoDB', 'XtraDB' ), true ) || false === $wpdb->query( 'SET TRANSACTION ISOLATION LEVEL SERIALIZABLE' ) ) {
+			return false;
+		}
+	}
+	if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
+		return false;
+	}
+	$current = static function () use ( $id, $key ) {
+		wp_cache_delete( $id, 'post_meta' );
+		return get_post_meta( $id, $key, false );
+	};
+	// A native hook can write through this same connection even while the database row is locked.
+	$conflict     = false;
+	$guard        = static function ( $object_id, $meta_key, $candidate ) use ( $current, $previous, $value, $key, $id, &$conflict ) {
+		if ( $id === $object_id && $key === $meta_key && $candidate === $value && $current() !== $previous ) {
+			$conflict = true;
+			throw new \DomainException( 'The reviewed metadata changed before the write.' );
+		}
+	};
+	$update_guard = static function ( $meta_id, $object_id, $meta_key, $serialized ) use ( $guard ) {
+		$guard( $object_id, $meta_key, maybe_unserialize( $serialized ) );
+	};
+	$committed    = false;
+	try {
+		if ( false === $wpdb->query( $wpdb->prepare( 'SELECT meta_id FROM %i WHERE post_id = %d FOR UPDATE', $wpdb->postmeta, $id ) ) || $current() !== $previous ) {
+			return false;
+		}
+		add_action( 'add_post_meta', $guard, PHP_INT_MAX, 3 );
+		add_action( 'update_postmeta', $update_guard, PHP_INT_MAX, 4 );
+		try {
+			if ( $previous ) {
+				update_post_meta( $id, $key, wp_slash( $value ), $previous[0] );
+			} else {
+				add_post_meta( $id, $key, wp_slash( $value ), true );
+			}
+		} catch ( \DomainException $exception ) {
+			if ( ! $conflict ) {
+				throw $exception;
+			}
+			// Keep the intervening native edit. Our write was stopped before its SQL statement.
+		} finally {
+			remove_action( 'add_post_meta', $guard, PHP_INT_MAX );
+			remove_action( 'update_postmeta', $update_guard, PHP_INT_MAX );
+		}
+		$stored    = $current();
+		$committed = false !== $wpdb->query( 'COMMIT' );
+		return $committed && ! $conflict && array( $value ) === $stored;
+	} finally {
+		if ( ! $committed ) {
+			$wpdb->query( 'ROLLBACK' );
+			wp_cache_delete( $id, 'post_meta' );
+		}
+	}
 }
 
 function commit( string $operation, array $plan, array $state ): array|\WP_Error {
@@ -549,10 +642,8 @@ function commit( string $operation, array $plan, array $state ): array|\WP_Error
 	$id   = $item['id'];
 	if ( $plan['meta'] ) {
 		foreach ( $plan['meta'] as $key => $value ) {
-			$previous = get_post_meta( $id, $key, true );
-			update_post_meta( $id, $key, wp_slash( $value ), $previous );
-			if ( get_post_meta( $id, $key, true ) !== $value ) {
-				return RestTools\error( 'design_readback', 'GeneratePress stored a different rule. Read the item before retrying.', 409 );
+			if ( ! write_reviewed_meta( $id, $key, $plan['previous_meta'], $value ) ) {
+				return RestTools\error( 'design_readback', 'The reviewed Element rules could not be saved unchanged. Read the item before retrying.', 409 );
 			}
 		}
 		return read_item(
@@ -564,6 +655,28 @@ function commit( string $operation, array $plan, array $state ): array|\WP_Error
 		);
 	}
 
+	$form_guard = null;
+	if ( 'update_form_messages' === $operation ) {
+		$key = \GenerateBlocks_Pro_Form_Post_Type::META_KEY;
+		wp_cache_delete( $id, 'post_meta' );
+		$previous = get_post_meta( $id, $key, false );
+		$changes  = array_map( static fn( $diff ) => $diff['after'], $plan['impact'] );
+		$fresh    = form_messages( $id, $changes );
+		if ( 1 !== count( $previous ) || is_wp_error( $fresh ) || $plan['impact'] !== $fresh['review'] ) {
+			return RestTools\error( 'stale', 'The reviewed form message changed before saving. Read the form again.', 409 );
+		}
+		// Preserve the vendor REST validators and merge just the requested messages into the current configuration.
+		$plan['body']['meta'] = $fresh['meta'];
+		$value                = $fresh['meta'][ $key ];
+		$form_guard           = static function ( $check, $object_id, $meta_key, $candidate, $prev ) use ( $id, $key, $value, $previous, &$form_guard ) {
+			if ( null !== $check || $id !== $object_id || $key !== $meta_key || '' !== $prev || Integrations\canonical( $candidate ) !== Integrations\canonical( $value ) ) {
+				return $check;
+			}
+			remove_filter( 'update_post_metadata', $form_guard, PHP_INT_MAX );
+			return write_reviewed_meta( $id, $key, $previous, $candidate );
+		};
+		add_filter( 'update_post_metadata', $form_guard, PHP_INT_MAX, 5 );
+	}
 	// pre_post_update supplies unslashed database values, including literal block JSON escapes.
 	$guard = static function ( $id_to_save, $data ) use ( $id, $state, $plan ) {
 		if ( $id_to_save !== $id ) {
@@ -571,6 +684,12 @@ function commit( string $operation, array $plan, array $state ): array|\WP_Error
 		}
 		$original = $state['post'];
 		$status   = $plan['body']['status'] ?? $original->post_status;
+		if ( isset( $plan['publication'] ) ) {
+			$current = snapshot( 'element', $id );
+			if ( is_wp_error( $current ) || $state['review']['state_hash'] !== $current['review']['state_hash'] ) {
+				throw new \DomainException( 'The reviewed Element content or placement changed.' );
+			}
+		}
 		if ( ( $data['post_status'] ?? '' ) !== $status || ( $data['post_content'] ?? '' ) !== $original->post_content ) {
 			throw new \DomainException( 'The underlying save changed the reviewed status or content.' );
 		}
@@ -582,6 +701,9 @@ function commit( string $operation, array $plan, array $state ): array|\WP_Error
 		$result = request( $plan['method'], $plan['route'], $plan['body'] );
 	} finally {
 		remove_action( 'pre_post_update', $guard, PHP_INT_MAX );
+		if ( null !== $form_guard ) {
+			remove_filter( 'update_post_metadata', $form_guard, PHP_INT_MAX );
+		}
 	}
 	if ( is_wp_error( $result ) ) {
 		return $result;
@@ -650,15 +772,25 @@ function apply( $input ): array|\WP_Error {
 		if ( is_wp_error( $state ) ) {
 			return $state;
 		}
-		if ( ! hash_equals( $saved['state_hash'], $state['review']['state_hash'] ) ) {
-			return RestTools\error( 'stale', 'The design item changed after review. Prepare a new preview.', 409 );
+		$plan  = plan( $operation, $state, $saved['changes'] );
+		$stale = ! hash_equals( $saved['state_hash'], $state['review']['state_hash'] );
+		if ( $stale || ( ! is_wp_error( $plan ) && ! hash_equals( $saved['review'], fingerprint( $plan ) ) ) ) {
+			$request = array(
+				'site_url'   => Connector\bound_site(),
+				'id'         => $saved['id'],
+				'kind'       => $saved['kind'],
+				'operation'  => $operation,
+				'changes'    => $saved['changes'],
+				'state_hash' => $state['review']['state_hash'],
+			);
+			$error   = RestTools\error( 'stale', 'The reviewed item or its proposed effect changed.', 409 );
+			return RestTools\refreshed_error( $error, preview( $request, $saved ), $saved );
 		}
-		$plan = plan( $operation, $state, $saved['changes'] );
 		if ( is_wp_error( $plan ) ) {
 			return $plan;
 		}
-		if ( ! hash_equals( $saved['review'], fingerprint( $plan ) ) || ! RestTools\consume_preview( $saved ) ) {
-			return RestTools\error( 'stale', 'Usage, settings or the active preview changed. Prepare a fresh preview.', 409 );
+		if ( ! RestTools\consume_preview( $saved ) ) {
+			return RestTools\error( 'token', 'The preview was replaced or already claimed.', 409 );
 		}
 		try {
 			$result = commit( $operation, $plan, $state );

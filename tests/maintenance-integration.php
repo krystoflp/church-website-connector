@@ -22,7 +22,27 @@ if($original_marker===false){delete_option($marker);}else{update_option($marker,
 
 $stored_update=get_option(U\CHECK_STATUS,false);update_option(U\CHECK_STATUS,['last_attempt'=>time(),'last_success'=>time()-60,'latest'=>'1.7.3','result'=>'failed','secret'=>'DO-NOT-COPY-SECRET'],false);
 $keys=['church_connector_rest_audit','church_connector_redirect_audit','church_connector_integration_audit','church_connector_used_css_log'];$old=[];foreach($keys as $key){$old[$key]=get_option($key,false);}
-foreach($keys as $key){$rows=[];for($i=0;$i<55;$i++){$rows[]=['time_utc'=>gmdate('c',time()-$i),'user_id'=>1,'operation'=>'update','id'=>$i+1,'result'=>'updated','status'=>'cleared','url'=>'https://private.example/DO-NOT-COPY-SECRET','code'=>'DO-NOT-COPY-SECRET','changes'=>['api_token'=>'DO-NOT-COPY-SECRET']];$rows[$i]['time_utc']=gmdate('Y-m-d\TH:i:s\Z',time()-$i);}update_option($key,$rows,false);}
+// Retained older rows use two UTC spellings. Leave each original timestamp untouched.
+$now = time();
+foreach ( $keys as $key ) {
+	$rows = array();
+	$format = in_array( $key, array( C\Integrations\AUDIT, C\UsedCss\LOG ), true ) ? 'c' : 'Y-m-d\TH:i:s\Z';
+	for ( $i = 0; $i < 55; $i++ ) {
+		$rows[] = array( 'time_utc' => gmdate( $format, $now - 60 - $i ), 'user_id' => 1, 'operation' => 'update', 'integration' => 'ws-form', 'id' => $i + 1, 'result' => 'updated', 'url' => 'https://private.example/DO-NOT-COPY-SECRET', 'code' => 'DO-NOT-COPY-SECRET' );
+	}
+	update_option( $key, $rows, false );
+}
+$legacy = M\recent_changes();
+maintenance_check( 50 === count( $legacy ) && 4 === count( array_unique( array_column( $legacy, 'source' ) ) ) && $now - 60 === $legacy[0]['timestamp'], 'Historical UTC timestamps from all four stores are merged by instant before applying the display limit' );
+$css_history = get_option( C\UsedCss\LOG );
+foreach ( array( 'not-a-date', '2026-02-30T01:00:00Z', '2030-01-01T01:00:00+01:00' ) as $invalid ) {
+	array_unshift( $css_history, array( 'time_utc' => $invalid, 'id' => 987654, 'status' => 'cleared' ) );
+}
+update_option( C\UsedCss\LOG, $css_history, false );
+C\UsedCss\audit( array( 'scope' => 'page', 'url' => 'https://private.example/DO-NOT-COPY-SECRET', 'status' => 'cleared' ) );
+$latest = M\recent_changes();
+maintenance_check( 'Used CSS' === $latest[0]['source'] && 'clear' === $latest[0]['operation'] && 'cleared' === $latest[0]['result'] && 'Z' === substr( get_option( C\UsedCss\LOG )[0]['time_utc'], -1 ), 'Real Used CSS audit output appears with its outcome and the common UTC format' );
+maintenance_check( ! in_array( 987654, array_column( $latest, 'item_id' ), true ) && ! str_contains( wp_json_encode( $latest ), 'DO-NOT-COPY-SECRET' ), 'Malformed or non-UTC timestamps are excluded and sensitive stored values remain private' );
 // Exercise the registered MCP status ability with the same policy sources as Installed Plugins.
 $ability = wp_get_ability('church-connector/connection-status');
 $recorded = get_option(U\CHECK_STATUS);
@@ -77,6 +97,7 @@ maintenance_check(str_contains($html,'Unattended connector updates do not instal
 maintenance_check(strpos($html,'id="cwc-summary"')<strpos($html,'Connect your assistant')&&str_contains($html,'Latest known stable release')&&str_contains($html,'Last successful release check'),'Compact status appears before detailed setup and reports update state');
 maintenance_check(str_contains($html,'id="cwc-diagnostic-report"')&&str_contains($html,'readonly')&&str_contains($html,'Copy diagnostic report'),'Report has a labelled read-only field and copy control');
 ob_start();M\activity_page();$activity=ob_get_clean();maintenance_check(str_contains($activity,'scope="col"')&&str_contains($activity,'Recent connector changes')&&!str_contains($activity,'DO-NOT-COPY-SECRET'),'Activity screen renders semantic rows without sensitive audit values');
+maintenance_check( str_contains( $activity, '<td>Used CSS</td><td>clear</td>' ) && str_contains( $activity, '<td>WS Form Pro</td>' ), 'Tools screen renders the new Used CSS operation and retained integration entries' );
 maintenance_check(C\settings()===$settings&&wp_roles()->roles===$roles&&get_site_option('auto_update_plugins')===$before_updates,'Administration views do not change settings, roles or update preferences');remove_filter('pre_http_request',$network,100);
 wp_set_current_user(0);maintenance_check(is_wp_error(M\diagnostic_report())&&is_wp_error(M\recent_changes())&&M\site_health(['keep'=>true])===['keep'=>true],'Anonymous access is denied, including Site Health');
 $editor=wp_insert_user(['user_login'=>'maintenance-editor','user_pass'=>'local-fixture-only','role'=>'editor']);wp_set_current_user($editor);maintenance_check(is_wp_error($ability->execute([])) && is_wp_error(C\mcp_connection_status()), 'Native and direct status deny editors');maintenance_check(is_wp_error(M\diagnostic_report())&&is_wp_error(M\recent_changes()),'Non-administrator cannot read diagnostics or activity');wp_set_current_user(1);

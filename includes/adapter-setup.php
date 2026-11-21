@@ -235,7 +235,7 @@ function run( bool $automatic = false ) {
 			Connector\Maintenance\initial_auto_update( PLUGIN_FILE );
 		}
 		$activated = activate_plugin( PLUGIN_FILE, '', false, false );
-		if ( is_wp_error( $activated ) ) {
+		if ( is_wp_error( $activated ) || ! is_plugin_active( PLUGIN_FILE ) ) {
 			return finish( 'failed', __( 'MCP Adapter was installed but WordPress could not activate it. Review it on the Plugins screen before retrying.', 'church-website-connector' ) );
 		}
 		return finish( 'complete', __( 'MCP Adapter is installed and active. Reload the settings page to check its native interfaces.', 'church-website-connector' ) );

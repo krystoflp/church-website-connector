@@ -19,11 +19,13 @@ namespace {
     function is_user_logged_in(){return $GLOBALS['signed_in'];}
     function current_user_can($cap){return $GLOBALS['admin'];}
     function add_action(...$args){}
+    function add_filter(...$args){}
     function wp_json_encode($value){return json_encode($value);}
     function wp_register_ability($name,$args){$GLOBALS['abilities'][$name]=$args;}
     function register_rest_route($namespace,$name,$args){$GLOBALS['routes'][$namespace.$name]=$args;}
     $path=__DIR__.'/../includes/integration-tools.php';
     if(!is_file($path)){$path=__DIR__.'/../church-website-connector/includes/integration-tools.php';}
+    require_once dirname($path).'/rest-tools.php';
     require $path;
     $checks=0;
     function check($value,$message){global $checks;$checks++;if(!$value){throw new \RuntimeException($message);}}

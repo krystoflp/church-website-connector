@@ -110,6 +110,7 @@ foreach ( [
     'ahead' => [ 'notice-success', 'Your installed connector is newer' ],
     'incompatible' => [ 'notice-warning', 'it requires a newer WordPress or PHP version' ],
     'failed' => [ 'notice-error', 'The update check failed.' ],
+    'offer_not_saved' => [ 'notice-warning', 'WordPress could not retain the matching result' ],
 ] as $notice_status => [ $notice_type, $notice_text ] ) {
     set_transient( 'church_connector_update_notice_1', [ 'status' => $notice_status, 'version' => '__FUTURE_VERSION__' ], 120 );
     ob_start(); ChurchWebsiteConnector\admin_page(); $page = ob_get_clean();
@@ -121,7 +122,40 @@ $http_failure = static function( $pre, $args, $url ) { return $url === U\API . '
 add_filter( 'pre_http_request', $http_failure, 20, 3 );
 $before_failure = serialize( get_site_transient('update_plugins') );
 updater_check( is_wp_error( U\check_now() ) && serialize( get_site_transient('update_plugins') ) === $before_failure, 'GitHub failure preserves cached WordPress offers' );
+$old_updates = get_site_transient( 'update_plugins' );
+$expired = clone $old_updates;
+$expired->last_checked = 0;
+set_site_transient( 'update_plugins', $expired );
+wp_update_plugins();
+updater_check( ( get_site_transient( 'update_plugins' )->response[$plugin]->new_version ?? null ) === '__FUTURE_VERSION__', 'Native scheduled refresh retains a recently verified connector offer during a GitHub outage' );
+$expired_history = get_option( U\CHECK_STATUS );
+$expired_history['last_success'] = time() - 25 * HOUR_IN_SECONDS;
+update_option( U\CHECK_STATUS, $expired_history );
+updater_check( false === U\update_offer( false, array( 'UpdateURI' => U\REPOSITORY ), $plugin, array() ), 'An outage cannot continue offering a result more than 24 hours old' );
+set_site_transient( 'update_plugins', $old_updates );
 remove_filter( 'pre_http_request', $http_failure, 20 );
+$omit_offer = static function ( $updates ) use ( $plugin ) {
+    unset( $updates->response[ $plugin ] );
+    return $updates;
+};
+add_filter( 'pre_set_site_transient_update_plugins', $omit_offer );
+updater_check( 'offer_not_saved' === U\check_now()['status'] && ! isset( get_site_transient( 'update_plugins' )->response[$plugin] ), 'A checked release cannot report a retained WordPress offer when another update manager removed it' );
+remove_filter( 'pre_set_site_transient_update_plugins', $omit_offer );
+$wrong_url = static function ( $updates ) use ( $plugin ) {
+    $updates->response[ $plugin ]->package = U\asset_url( '__CURRENT_VERSION__', 'zip' );
+    return $updates;
+};
+add_filter( 'pre_set_site_transient_update_plugins', $wrong_url );
+updater_check( 'offer_not_saved' === U\check_now()['status'], 'A genuine official package for a different version is refused during the update check' );
+$installer = new Plugin_Upgrader( new Automatic_Upgrader_Skin() );
+$download_guard = null;
+$observe_download = static function ( $value ) use ( &$download_guard ) { $download_guard = $value; return $value; };
+add_filter( 'upgrader_pre_download', $observe_download, PHP_INT_MAX );
+$wrong_result = $installer->upgrade( $plugin, [ 'clear_update_cache' => false ] );
+remove_filter( 'upgrader_pre_download', $observe_download, PHP_INT_MAX );
+updater_check( true !== $wrong_result && is_wp_error( $download_guard ) && 'church_connector_package_release' === $download_guard->get_error_code() && '__CURRENT_VERSION__' === get_plugin_data( WP_PLUGIN_DIR . '/' . $plugin )['Version'], 'The native upgrader refuses an older official ZIP before touching the installed plugin' );
+remove_filter( 'pre_set_site_transient_update_plugins', $wrong_url );
+U\check_now();
 // Cached exact-version data cannot conceal a changed or incompatible latest release.
 $metadata['requires_php'] = '99.0';
 updater_check( U\check_now()['status'] === 'incompatible' && get_site_transient('update_plugins')->response[$plugin]->disable_autoupdate, 'Manual check re-fetches metadata and reports incompatible update' );
@@ -149,6 +183,32 @@ $bad = apply_filters( 'upgrader_pre_download', false, $offer->package, null, [ '
 updater_check( is_wp_error( $bad ) && $bad->get_error_code() === 'church_connector_package_integrity', 'Native download hook rejects changed package bytes' );
 updater_check( get_plugin_data( WP_PLUGIN_DIR . '/' . $plugin )['Version'] === '__CURRENT_VERSION__', 'Rejected package leaves installed version intact' );
 $tampered = false;
+$mirror = 'https://mirror.example/cache/connector.zip';
+updater_check( $zip === U\verified_download( $zip, $mirror, null, array( 'plugin' => $plugin ) ), 'A mirrored connector update can use a previously downloaded file matching the official release hash' );
+$bad_mirror = wp_tempnam( 'connector-mirror-test' );
+file_put_contents( $bad_mirror, 'incomplete fixture' );
+updater_check( 'church_connector_package_integrity' === U\verified_download( $bad_mirror, $mirror, null, array( 'plugin' => $plugin ) )->get_error_code() && is_file( $bad_mirror ), 'An altered package from an update cache is refused and caller-owned files are preserved' );
+updater_check( $bad_mirror === U\verified_download( $bad_mirror, $mirror, null, array( 'plugin' => 'other/other.php' ) ), 'An unrelated mirrored plugin remains the responsibility of its own updater' );
+updater_check( $zip === U\verified_download( false, $zip, null, array( 'plugin' => $plugin ) ), 'A directly supplied local package path from a managed update cache gets the same checksum verification' );
+$late_mirror = static fn() => $bad_mirror;
+add_filter( 'upgrader_pre_download', $late_mirror, 98 );
+$filtered = apply_filters( 'upgrader_pre_download', false, $mirror, null, array( 'plugin' => $plugin ) );
+remove_filter( 'upgrader_pre_download', $late_mirror, 98 );
+updater_check( is_wp_error( $filtered ) && 'church_connector_package_integrity' === $filtered->get_error_code(), 'A later-priority download manager still passes through the final checksum check' );
+wp_delete_file( $bad_mirror );
+$wrong_header = static function ( $source ) {
+    $main = trailingslashit( $source ) . U\SLUG . '.php';
+    file_put_contents( $main, str_replace( 'Version: __FUTURE_VERSION__', 'Version: __CURRENT_VERSION__', file_get_contents( $main ) ) );
+    return $source;
+};
+add_filter( 'upgrader_source_selection', $wrong_header, 20 );
+$source_guard = null;
+$observe_source = static function ( $value ) use ( &$source_guard ) { $source_guard = $value; return $value; };
+add_filter( 'upgrader_source_selection', $observe_source, PHP_INT_MAX );
+$header_result = ( new Plugin_Upgrader( new Automatic_Upgrader_Skin() ) )->upgrade( $plugin, [ 'clear_update_cache' => false ] );
+remove_filter( 'upgrader_source_selection', $wrong_header, 20 );
+remove_filter( 'upgrader_source_selection', $observe_source, PHP_INT_MAX );
+updater_check( true !== $header_result && is_wp_error( $source_guard ) && 'church_connector_package_version' === $source_guard->get_error_code() && '__CURRENT_VERSION__' === get_plugin_data( WP_PLUGIN_DIR . '/' . $plugin )['Version'], 'A verified ZIP with the wrong unpacked header is refused before the installed plugin is replaced' );
 $skin = new Automatic_Upgrader_Skin();
 $upgrader = new Plugin_Upgrader( $skin );
 $result = $upgrader->upgrade( $plugin, [ 'clear_update_cache' => false ] );

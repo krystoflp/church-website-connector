@@ -18,6 +18,18 @@ function permission( $input = null ): true|\WP_Error {
 	return current_user_can( 'edit_theme_options' ) ? true : RestTools\error( 'menu_permission', 'Your account cannot manage classic navigation menus.', 403 );
 }
 
+/** The native menu view can strip markup, shorten descriptions and substitute a linked post's title. */
+function stored_attributes( \WP_Post $item ): array {
+	return array(
+		'menu-item-title'       => $item->post_title,
+		'menu-item-description' => $item->post_content,
+		'menu-item-attr-title'  => $item->post_excerpt,
+		'menu-item-target'      => (string) get_post_meta( $item->ID, '_menu_item_target', true ),
+		'menu-item-xfn'         => (string) get_post_meta( $item->ID, '_menu_item_xfn', true ),
+		'menu-item-classes'     => get_post_meta( $item->ID, '_menu_item_classes', true ),
+	);
+}
+
 function snapshot( int $id ): array|\WP_Error {
 	$menu = wp_get_nav_menu_object( $id );
 	if ( ! $menu || $id !== $menu->term_id ) {
@@ -49,6 +61,7 @@ function snapshot( int $id ): array|\WP_Error {
 	$rows  = array();
 	$guard = array();
 	foreach ( $items as $item ) {
+		$guard[]           = array( stored_attributes( $item ), $item->post_parent, $item->ping_status, $item->post_modified_gmt );
 		$item              = wp_setup_nav_menu_item( $item );
 		$rows[ $item->ID ] = array(
 			'id'        => $item->ID,
@@ -61,7 +74,6 @@ function snapshot( int $id ): array|\WP_Error {
 			'object_id' => (int) $item->object_id,
 			'valid'     => empty( $item->_invalid ),
 		);
-		$guard[]           = array( $item->post_title, $item->post_modified_gmt, $item->target, $item->description, $item->attr_title, $item->classes, $item->xfn );
 	}
 	$locations = array_keys( array_map( 'intval', get_nav_menu_locations() ), $id, true );
 	$review    = array(
@@ -210,7 +222,7 @@ function plan( array $menu, array $input ): array|\WP_Error {
 	);
 }
 
-function preview( $input ): array|\WP_Error {
+function preview( $input, ?array $replaces = null ): array|\WP_Error {
 	$checked = PostTools\check( $input, array( 'id', 'state_hash', 'item_id', 'changes' ) );
 	if ( is_wp_error( $checked ) ) {
 		return $checked;
@@ -236,7 +248,8 @@ function preview( $input ): array|\WP_Error {
 			'state_hash' => $menu['state_hash'],
 			'changes'    => $parameters,
 			'review'     => hash( 'sha256', wp_json_encode( $plan ) ),
-		)
+		),
+		$replaces
 	);
 	return is_wp_error( $saved ) ? $saved : $state + array(
 		'proposed_items' => $plan['after'],
@@ -272,15 +285,22 @@ function apply( $input ): array|\WP_Error {
 		if ( is_wp_error( $menu ) ) {
 			return $menu;
 		}
-		if ( ! hash_equals( $saved['state_hash'], $menu['state_hash'] ) ) {
-			return RestTools\error( 'stale', 'The menu changed after review.', 409 );
+		$plan  = plan( $menu, $saved['changes'] );
+		$stale = ! hash_equals( $saved['state_hash'], $menu['state_hash'] );
+		if ( $stale || ( ! is_wp_error( $plan ) && ! hash_equals( $saved['review'], hash( 'sha256', wp_json_encode( $plan ) ) ) ) ) {
+			$request = array(
+				'site_url'   => Connector\bound_site(),
+				'id'         => $saved['id'],
+				'state_hash' => $menu['state_hash'],
+			) + $saved['changes'];
+			$error   = RestTools\error( 'stale', 'The reviewed item or its proposed effect changed.', 409 );
+			return RestTools\refreshed_error( $error, preview( $request, $saved ), $saved );
 		}
-		$plan = plan( $menu, $saved['changes'] );
 		if ( is_wp_error( $plan ) ) {
 			return $plan;
 		}
-		if ( ! hash_equals( $saved['review'], hash( 'sha256', wp_json_encode( $plan ) ) ) || ! RestTools\consume_preview( $saved ) ) {
-			return RestTools\error( 'stale', 'The destination changed or the preview was replaced. Prepare a fresh preview.', 409 );
+		if ( ! RestTools\consume_preview( $saved ) ) {
+			return RestTools\error( 'token', 'The preview was replaced or already claimed.', 409 );
 		}
 		$result = commit( $menu, $saved['changes']['item_id'], $plan );
 		RestTools\audit( $saved, is_wp_error( $result ) ? 'error' : 'verified' );
@@ -290,13 +310,58 @@ function apply( $input ): array|\WP_Error {
 	}
 }
 
+/** Include the saved item and fresh state if WordPress stopped after the first write. */
+function partially_saved( int $menu_id, int $saved_id, bool $created, array $moves, $current = null ): \WP_Error {
+	$current = $current ?? snapshot( $menu_id );
+	$message = sprintf( 'WordPress saved menu item %d, but could not verify the full change. Read menu %d before another edit.', $saved_id, $menu_id );
+	return RestTools\review_error(
+		'church_connector_rest_menu_partial',
+		$message,
+		$message,
+		array(
+			'status'          => 409,
+			'item_id'         => $saved_id,
+			'created_item_id' => $created ? $saved_id : null,
+			'completed_moves' => $moves,
+			'menu'            => is_wp_error( $current ) ? null : $current,
+		)
+	);
+}
+
 function commit( array $menu, int $item_id, array $plan ): array|\WP_Error {
 	$before = array_column( $menu['items'], null, 'id' );
 	$error  = RestTools\error( 'menu_save', 'WordPress could not verify the menu change. Read the menu before retrying.', 409 );
+	$item   = $item_id ? get_post( $item_id ) : null;
+	if ( $item_id && ! $item ) {
+		return $error;
+	}
+	$keep = $item ? stored_attributes( $item ) : array();
+	if ( isset( $plan['body']['title'] ) || isset( $plan['body']['type'] ) ) {
+		unset( $keep['menu-item-title'] );
+	}
+	$columns = array();
+	if ( $item ) {
+		$columns = array(
+			'post_content' => $item->post_content,
+			'post_excerpt' => $item->post_excerpt,
+			'ping_status'  => $item->ping_status,
+		);
+		if ( isset( $keep['menu-item-title'] ) ) {
+			$columns['post_title'] = $item->post_title;
+		}
+		if ( ! isset( $plan['body']['menu_order'] ) ) {
+			$columns['menu_order'] = $item->menu_order;
+		}
+		if ( ! isset( $plan['body']['type'] ) ) {
+			$columns['post_parent'] = $item->post_parent;
+		}
+	}
 	// Keep the native REST capability, validation, sanitisation and save hooks.
 	$request = new \WP_REST_Request( 'POST', '/wp/v2/menu-items' . ( $item_id ? '/' . $item_id : '' ) );
 	$request->set_body_params( $plan['body'] + ( $item_id ? array() : array( 'menus' => $menu['id'] ) ) );
-	$verify = static function ( $prepared, $incoming ) use ( $request, $menu, $item_id, $plan ) {
+	$protected_meta = array();
+	$preserve_post  = false;
+	$verify         = static function ( $prepared, $incoming ) use ( $request, $menu, $item_id, $plan, $keep, &$protected_meta, &$preserve_post ) {
 		if ( $incoming !== $request || is_wp_error( $prepared ) ) {
 			return $prepared;
 		}
@@ -322,40 +387,98 @@ function commit( array $menu, int $item_id, array $plan ): array|\WP_Error {
 				return RestTools\error( 'menu_save', 'WordPress would save different link values.', 409 );
 			}
 		}
+		foreach ( $keep as $field => $value ) {
+			if ( 'menu-item-classes' === $field ) {
+				if ( ! is_array( $value ) || array_filter( $value, 'is_string' ) !== $value ) {
+					continue;
+				}
+				$value = implode( ' ', $value );
+			}
+			$prepared->{ $field } = $value;
+		}
+		if ( $item_id ) {
+			$preserve_post  = true;
+			$protected_meta = array_fill_keys( array( '_menu_item_target', '_menu_item_xfn', '_menu_item_classes' ), true );
+			if ( ! isset( $plan['body']['type'] ) ) {
+				$protected_meta += array_fill_keys( array( '_menu_item_type', '_menu_item_object_id', '_menu_item_object', '_menu_item_url' ), true );
+			}
+			if ( ! isset( $plan['body']['parent'] ) ) {
+				$protected_meta['_menu_item_menu_item_parent'] = true;
+			}
+		}
 		return $prepared;
 	};
+	// Core writes every menu meta key. Omit each unrequested write, including normalisation of absent or legacy values.
+	$preserve_meta = static function ( $check, $id, $key ) use ( $item_id, &$protected_meta ) {
+		if ( $item_id === $id && isset( $protected_meta[ $key ] ) ) {
+			unset( $protected_meta[ $key ] );
+			return $check ?? true;
+		}
+		return $check;
+	};
+	// Core can replace an empty description with a space or move a zero-position item. Keep untouched native columns.
+	$preserve = static function ( $data, $postarr ) use ( $item_id, $columns, &$preserve_post ) {
+		if ( $preserve_post && (int) ( $postarr['ID'] ?? 0 ) === $item_id && 'nav_menu_item' === $data['post_type'] ) {
+			$preserve_post = false;
+			foreach ( $columns as $name => $value ) {
+				$data[ $name ] = wp_slash( $value );
+			}
+		}
+		return $data;
+	};
 	add_filter( 'rest_pre_insert_nav_menu_item', $verify, PHP_INT_MAX, 2 );
+	add_filter( 'update_post_metadata', $preserve_meta, PHP_INT_MAX, 3 );
+	add_filter( 'wp_insert_post_data', $preserve, PHP_INT_MAX, 2 );
 	try {
 		$result = rest_do_request( $request );
 	} finally {
 		remove_filter( 'rest_pre_insert_nav_menu_item', $verify, PHP_INT_MAX );
+		remove_filter( 'update_post_metadata', $preserve_meta, PHP_INT_MAX );
+		remove_filter( 'wp_insert_post_data', $preserve, PHP_INT_MAX );
 	}
 	if ( is_wp_error( $result ) || $result->get_status() >= 400 || empty( $result->get_data()['id'] ) ) {
 		return $error;
 	}
-	$saved_id = (int) $result->get_data()['id'];
+	$saved_id   = (int) $result->get_data()['id'];
+	$moves      = array();
+	$saved_item = get_post( $saved_id );
+	if ( $item && ( ! $saved_item || array_intersect_key( stored_attributes( $saved_item ), $keep ) !== $keep ) ) {
+		return partially_saved( $menu['id'], $saved_id, false, $moves );
+	}
+	foreach ( $columns as $key => $value ) {
+		if ( $saved_item->{$key} !== $value ) {
+			return partially_saved( $menu['id'], $saved_id, false, $moves );
+		}
+	}
 	foreach ( $plan['positions'] as $id => $position ) {
-		if ( $id === $item_id || $before[ $id ]['position'] === $position ) {
+		if ( $id === $item_id ) {
+			if ( get_post( $saved_id )?->menu_order === $position ) {
+				$moves[ $saved_id ] = $position;
+			}
+			continue;
+		}
+		if ( $before[ $id ]['position'] === $position ) {
 			continue;
 		}
 		$item = get_post( $id );
-		if ( ! $item || $item->menu_order !== $before[ $id ]['position']
-			|| ! has_term( $menu['id'], 'nav_menu', $id )
-			|| is_wp_error(
-				wp_update_post(
-					array(
-						'ID'         => $id,
-						'menu_order' => $position,
-					),
-					true
-				)
-			) ) {
-			return $error;
+		if ( ! $item || $item->menu_order !== $before[ $id ]['position'] || ! has_term( $menu['id'], 'nav_menu', $id ) ) {
+			return partially_saved( $menu['id'], $saved_id, ! $item_id, $moves );
 		}
+		$updated = wp_update_post(
+			array(
+				'ID'         => $id,
+				'menu_order' => $position,
+			),
+			true
+		);
+		if ( is_wp_error( $updated ) || get_post( $id )?->menu_order !== $position ) {
+			return partially_saved( $menu['id'], $saved_id, ! $item_id, $moves );
+		}
+		$moves[ $id ] = $position;
 	}
 	$after = snapshot( $menu['id'] );
 	if ( is_wp_error( $after ) ) {
-		return $after;
+		return partially_saved( $menu['id'], $saved_id, ! $item_id, $moves, $after );
 	}
 	$expected = $plan['after'];
 	foreach ( $expected as &$row ) {
@@ -374,7 +497,7 @@ function commit( array $menu, int $item_id, array $plan ): array|\WP_Error {
 	}
 	unset( $row );
 	if ( $expected !== $actual ) {
-		return $error;
+		return partially_saved( $menu['id'], $saved_id, ! $item_id, $moves, $after );
 	}
 	return array(
 		'site_url' => Connector\bound_site(),

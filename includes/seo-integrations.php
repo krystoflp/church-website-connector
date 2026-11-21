@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace ChurchWebsiteConnector\Integrations\Seo;
 use ChurchWebsiteConnector\Integrations as I;
 defined( 'ABSPATH' ) || exit;
+require_once __DIR__ . '/integration-write-guard.php';
 
 function definition( string $provider ): array {
     return $provider === 'seo-framework'
@@ -33,6 +34,9 @@ function rank_map(): array {
     return [ 'title' => 'rank_math_title', 'description' => 'rank_math_description', 'canonical_url' => 'rank_math_canonical_url', 'focus_keyword' => 'rank_math_focus_keyword', 'robots' => 'rank_math_robots', 'og_title' => 'rank_math_facebook_title', 'og_description' => 'rank_math_facebook_description', 'twitter_title' => 'rank_math_twitter_title', 'twitter_description' => 'rank_math_twitter_description', 'og_image' => 'rank_math_facebook_image', 'twitter_image' => 'rank_math_twitter_image' ];
 }
 function permission( array $target ) {
+	if ( 'seo-framework' === $target['provider'] && \The_SEO_Framework\is_headless( 'post' === $target['kind'] ? 'meta' : 'settings' ) ) {
+		return I\error( 'headless', 'The SEO Framework is managing these values in headless mode. Its stored settings cannot be reliably reviewed here.', 409 );
+	}
     if ( $target['kind'] === 'post' ) {
         $post = get_post( $target['id'] );
         if ( ! $post || ! in_array( $post->post_type, [ 'post', 'page' ], true ) || $post->post_status === 'trash' || ! current_user_can( 'edit_post', $post->ID ) ) { return I\error( 'forbidden', 'Your account must be allowed to edit this existing post or page.', 403 ); }
@@ -64,9 +68,50 @@ function visible( array $target, array $raw ): array {
 }
 function read( array $target ) {
     $ok = permission( $target ); if ( is_wp_error( $ok ) ) { return $ok; }
-    $raw = raw( $target ); $state = $raw;
-    if ( $target['kind'] === 'post' ) { $post = get_post( $target['id'] ); $state = [ $raw, $post->post_type, $post->post_status, $post->post_modified_gmt, hash( 'sha256', $post->post_content ) ]; }
-    return [ 'data' => visible( $target, $raw ), 'state' => $state, 'raw' => $raw ];
+	$storage = I\WriteGuard\storage( $target );
+	if ( is_wp_error( $storage ) ) {
+		return $storage;
+	}
+	// Native editors in another request can update the database while this request
+	// still holds the previous vendor or WordPress memoized value.
+	if ( 'post' === $target['kind'] ) {
+		wp_cache_delete( $target['id'], 'post_meta' );
+		if ( 'seo-framework' === $target['provider'] ) {
+			\The_SEO_Framework\Data\Plugin\Post::refresh_static_properties();
+		}
+	} else {
+		$name       = I\WriteGuard\option_name( $target );
+		$stored     = $storage['values']['record'][0]['option_value'] ?? null;
+		$autoload   = wp_cache_get( 'alloptions', 'options' );
+		$absent     = wp_cache_get( 'notoptions', 'options' );
+		$individual = wp_cache_get( $name, 'options', false, $found );
+		if ( $found && $individual !== $stored ) {
+			wp_cache_delete( $name, 'options' );
+		}
+		if ( isset( $autoload[ $name ] ) && $autoload[ $name ] !== $stored ) {
+			wp_cache_delete( 'alloptions', 'options' );
+		}
+		if ( null !== $stored && isset( $absent[ $name ] ) ) {
+			wp_cache_delete( 'notoptions', 'options' );
+		}
+		if ( 'seo-framework' === $target['provider'] ) {
+			\The_SEO_Framework\Data\Plugin::refresh_static_properties();
+		} else {
+			rank_math()->settings->reset();
+		}
+	}
+	$raw   = raw( $target );
+	$state = $raw;
+	if ( 'post' === $target['kind'] ) {
+		$post  = get_post( $target['id'] );
+		$state = array( $raw, $post->post_type, $post->post_status, $post->post_modified_gmt, hash( 'sha256', $post->post_content ) );
+	}
+	return array(
+		'data'          => visible( $target, $raw ),
+		'state'         => array( $state, I\fingerprint( $storage ) ),
+		'raw'           => $raw,
+		'write_storage' => $storage,
+	);
 }
 function rank_field_types( array $fields ): array {
     $types = []; foreach ( $fields as $key => $spec ) { $types[ $key ] = match ( $spec['type'] ) { 'boolean' => 'toggle', 'integer' => 'number', 'array' => 'checkboxlist', default => 'text' }; } return $types;
@@ -79,7 +124,12 @@ function prepare( array $target, array $item, string $operation, array $changes 
         $merged = $item['raw']; $map = $target['kind'] === 'post' ? tsf_map() : array_combine( array_keys( $schema ), array_keys( $schema ) );
         foreach ( $clean as $name => $value ) { $merged[ $map[ $name ] ] = is_bool( $value ) ? (int) $value : $value; }
         $normalised = $target['kind'] === 'post' ? \The_SEO_Framework\Data\Filter\Post::filter_meta_update( $merged ) : \The_SEO_Framework\Data\Filter\Plugin::filter_settings_update( $merged, THE_SEO_FRAMEWORK_SITE_OPTIONS, $merged );
-        $clean = array_intersect_key( visible( $target, $normalised ), $clean );
+		$normalised = visible( $target, $normalised );
+		if ( 'post' === $target['kind'] && isset( $clean['social_image_url'] ) && $normalised['social_image_id'] !== $item['data']['social_image_id'] ) {
+			// TSF clears the attached image ID when its URL is removed. Include this in the approval.
+			$clean['social_image_id'] = $normalised['social_image_id'];
+		}
+		$clean = array_intersect_key( $normalised, $clean );
     } elseif ( $target['kind'] === 'settings' ) {
         $normalised = \RankMath\Admin\Sanitize_Settings::sanitize( $clean, rank_field_types( $schema ) );
         $clean = array_intersect_key( visible( $target, $normalised ), $clean );
@@ -91,12 +141,43 @@ function prepare( array $target, array $item, string $operation, array $changes 
     return [ 'changes' => $clean, 'diff' => I\diff( $item['data'], $clean ), 'warning' => $target['kind'] === 'settings' ? 'Preview only. This changes site-wide SEO behaviour; review indexing and sitemap effects before approval.' : 'Preview only. Review the SEO metadata diff before approval.' ];
 }
 function write( array $target, array $item, string $operation, array $changes ) {
-    $ok = permission( $target ); if ( is_wp_error( $ok ) ) { return $ok; }
+	$allowed = permission( $target );
+	if ( is_wp_error( $allowed ) ) {
+		return $allowed;
+	}
+	return I\WriteGuard\run( $target, $item, $operation, static fn() => save( $target, $item, $changes ) );
+}
+
+function save( array $target, array $item, array $changes ) {
     if ( $target['provider'] === 'seo-framework' ) {
         $values = $target['kind'] === 'post' ? $item['raw'] : [];
         foreach ( $changes as $name => $value ) { $key = $target['kind'] === 'post' ? tsf_map()[ $name ] : $name; $values[ $key ] = is_bool( $value ) ? (int) $value : $value; }
-        if ( $target['kind'] === 'post' ) { tsf()->data()->plugin()->post()->save_meta( $target['id'], $values ); }
-        else { tsf()->data()->plugin()->update_option( $values ); \The_SEO_Framework\Sitemap\Registry::refresh_sitemaps(); \The_SEO_Framework\Helper\Query\Exclusion::clear_excluded_post_ids_cache(); }
+		if ( 'post' === $target['kind'] ) {
+			$keys       = array_intersect_key( tsf_map(), $changes );
+			$unreviewed = array_diff_key( $item['raw'], array_flip( $keys ) );
+			$modifiers  = array( 'add_post_metadata', 'update_post_metadata', 'delete_post_metadata' );
+			$preserve   = static function ( $result, $id, $key ) use ( $target, $unreviewed ) {
+				return $target['id'] === $id && array_key_exists( $key, $unreviewed ) ? true : $result;
+			};
+			foreach ( $modifiers as $hook ) {
+				add_filter( $hook, $preserve, PHP_INT_MAX, 3 );
+			}
+			try {
+				tsf()->data()->plugin()->post()->save_meta( $target['id'], $values );
+			} finally {
+				foreach ( $modifiers as $hook ) {
+					remove_filter( $hook, $preserve, PHP_INT_MAX );
+				}
+			}
+			$actual = array_intersect_key( raw( $target ), $unreviewed );
+			if ( I\canonical( $actual ) !== I\canonical( $unreviewed ) ) {
+				return I\error( 'readback', 'Other SEO metadata changed during the save. Inspect the page before retrying.', 409 );
+			}
+		} else {
+			tsf()->data()->plugin()->update_option( $values );
+			\The_SEO_Framework\Sitemap\Registry::refresh_sitemaps();
+			\The_SEO_Framework\Helper\Query\Exclusion::clear_excluded_post_ids_cache();
+		}
     } elseif ( $target['kind'] === 'post' ) {
         $meta = []; foreach ( $changes as $name => $value ) { $meta[ rank_map()[ $name ] ] = $value; }
         $result = I\native_rest( 'POST', '/rankmath/v1/updateMeta', [ 'objectID' => $target['id'], 'objectType' => 'post', 'meta' => $meta ] ); if ( is_wp_error( $result ) ) { return $result; }

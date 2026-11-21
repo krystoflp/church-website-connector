@@ -12,7 +12,9 @@ const EXPIRE = 'church_connector_expire_integration_preview';
 const TTL = 900;
 const MAX_JSON = 262144;
 
-function error( string $code, string $message, int $status = 400 ): \WP_Error { return new \WP_Error( 'church_connector_integration_' . $code, $message, [ 'status' => $status ] ); }
+function error( string $code, string $message, int $status = 400 ): \WP_Error {
+	return \ChurchWebsiteConnector\RestTools\workflow_error( 'church_connector_integration_', $code, $message, $status );
+}
 function base_permission( $input = null ) {
     return is_user_logged_in() && current_user_can( 'manage_options' ) && \ChurchWebsiteConnector\is_bound()
         ? true : error( 'forbidden', 'An administrator must sign in on this connector’s enabled, bound website.', 403 );
@@ -74,7 +76,9 @@ function native_rest( string $method, string $path, array $params = [] ) {
     // Callers construct every route from fixed names and validated numeric IDs.
     $allowed = preg_match( '~\A/code-snippets/v1/snippets(?:/[1-9][0-9]*(?:/(?:activate|deactivate))?)?\z~', $path )
         || in_array( $path, [ '/rankmath/v1/updateMeta', '/rankmath/v1/updateSettings' ], true );
-    if ( ! $allowed || ! in_array( $method, [ 'GET', 'POST', 'DELETE' ], true ) ) { return error( 'route', 'This REST operation is outside the integration allowlist.', 403 ); }
+	if ( ! $allowed || ! in_array( $method, array( 'GET', 'POST' ), true ) ) {
+		return error( 'route', 'This REST operation is outside the integration allowlist.', 403 );
+	}
     $request = new \WP_REST_Request( $method, $path );
     $method === 'GET' ? $request->set_query_params( $params ) : $request->set_body_params( $params );
     // Rank Math's native callback temporarily replaces protected-meta filters.
@@ -97,11 +101,33 @@ function read( array $target ) {
         };
     } catch ( \Throwable $e ) { return error( 'read', 'The plugin could not read this item: ' . $e->getMessage(), 502 ); }
     if ( is_wp_error( $item ) ) { return $item; }
-    if ( ! bounded_json( $item['data'] ) ) { return error( 'size', 'This item exceeds the bounded integration response size.' ); }
+	if ( ! bounded_json( $item['data'] ) ) {
+		if ( 'ws-form' !== $target['provider'] || ! isset( $item['data']['design'] ) ) {
+			return error( 'size', 'This item exceeds the bounded integration response size.' );
+		}
+		$item['paged_design'] = true;
+	}
     return $item + [ 'state_hash' => fingerprint( [ $target, status( $target['provider'] )['installed_version'], \ChurchWebsiteConnector\current_identity(), $item['state'] ] ) ];
 }
-function public_item( array $target, array $item ): array {
-    return [ 'site_url' => \ChurchWebsiteConnector\bound_site(), 'integration' => $target['provider'], 'kind' => $target['kind'], 'id' => $target['id'], 'section' => $target['section'], 'data' => $item['data'], 'state_hash' => $item['state_hash'] ];
+function public_item( array $target, array $item, int $page = 1 ): array|\WP_Error {
+	$data = $item['data'];
+	if ( ! empty( $item['paged_design'] ) ) {
+		$data = Forms\design_page( $data, $page );
+		if ( is_wp_error( $data ) ) {
+			return $data;
+		}
+	} elseif ( 1 !== $page ) {
+		return error( 'design_page', 'The complete design fits on the first page.' );
+	}
+	return array(
+		'site_url'    => \ChurchWebsiteConnector\bound_site(),
+		'integration' => $target['provider'],
+		'kind'        => $target['kind'],
+		'id'          => $target['id'],
+		'section'     => $target['section'],
+		'data'        => $data,
+		'state_hash'  => $item['state_hash'],
+	);
 }
 function capabilities( $input = [] ) {
     $ok = check( $input, [ 'site_url', 'integration' ] ); if ( is_wp_error( $ok ) ) { return $ok; }
@@ -115,9 +141,26 @@ function capabilities( $input = [] ) {
         'scope' => 'Fixed SEO, snippet and form-design operations only. No arbitrary routes, plugin installation, credentials, licence settings, submissions or bulk changes.' ];
 }
 function get_item( $input ) {
-    $ok = check( $input, [ 'site_url', 'integration', 'kind', 'id', 'section' ] ); if ( is_wp_error( $ok ) ) { return $ok; }
-    $target = target( $input ); if ( is_wp_error( $target ) ) { return $target; }
-    $item = read( $target ); return is_wp_error( $item ) ? $item : public_item( $target, $item );
+	$ok = check( $input, array( 'site_url', 'integration', 'kind', 'id', 'section', 'design_page', 'state_hash' ) );
+	if ( is_wp_error( $ok ) ) {
+		return $ok;
+	}
+	$target = target( $input );
+	if ( is_wp_error( $target ) ) {
+		return $target;
+	}
+	$page = $input['design_page'] ?? 1;
+	if ( ! is_int( $page ) || $page < 1 || ( ( isset( $input['design_page'] ) || isset( $input['state_hash'] ) ) && 'ws-form' !== $target['provider'] ) ) {
+		return error( 'design_page', 'Use a positive page number for a WS Form design.' );
+	}
+	$item = read( $target );
+	if ( is_wp_error( $item ) ) {
+		return $item;
+	}
+	if ( ( $page > 1 || isset( $input['state_hash'] ) ) && ( $input['state_hash'] ?? null ) !== $item['state_hash'] ) {
+		return error( 'design_changed', 'Read page one again and use its current state hash for subsequent pages.', 409 );
+	}
+	return public_item( $target, $item, $page );
 }
 function listing( $input ) {
     $ok = check( $input, [ 'site_url', 'integration', 'page', 'per_page', 'post_type' ] ); if ( is_wp_error( $ok ) ) { return $ok; }
@@ -135,7 +178,7 @@ function expire( int $user, string $hash ): void {
     $saved = get_option( stage_name( $user ), false );
     if ( is_array( $saved ) && ( $saved['token_hash'] ?? '' ) === $hash && ( $saved['expires'] ?? 0 ) <= time() ) { \ChurchWebsiteConnector\RestTools\conditional_delete( stage_name( $user ), $saved ); }
 }
-function preview( $input ) {
+function preview( $input, ?array $replaces = null ) {
     $ok = check( $input, [ 'site_url', 'integration', 'kind', 'id', 'section', 'state_hash', 'operation', 'changes' ] ); if ( is_wp_error( $ok ) ) { return $ok; }
     $target = target( $input ); if ( is_wp_error( $target ) ) { return $target; }
     $operation = $input['operation'] ?? 'update';
@@ -149,18 +192,45 @@ function preview( $input ) {
     catch ( \Throwable $e ) { return error( 'preview', 'The plugin could not validate the proposed change: ' . $e->getMessage() ); }
     if ( is_wp_error( $proposal ) ) { return $proposal; }
     if ( ! $proposal['diff'] ) { return error( 'unchanged', 'The proposed change has no effect.', 409 ); }
-    $token = bin2hex( random_bytes( 32 ) ); $user = get_current_user_id(); $old = get_option( stage_name( $user ), false );
-    if ( is_array( $old ) && isset( $old['token_hash'] ) ) { wp_clear_scheduled_hook( EXPIRE, [ $user, $old['token_hash'] ] ); }
-    $saved = [ 'token_hash' => hash( 'sha256', $token ), 'owner' => $user, 'site' => \ChurchWebsiteConnector\current_identity(), 'expires' => time() + TTL, 'target' => $target, 'operation' => $operation, 'state_hash' => $item['state_hash'], 'changes' => $proposal['changes'], 'code_execution' => $proposal['code_execution'] ?? false ];
-    if ( ! update_option( stage_name( $user ), $saved, false ) ) { return error( 'storage', 'The preview could not be saved; no item was changed.', 503 ); }
-    wp_schedule_single_event( $saved['expires'], EXPIRE, [ $user, $saved['token_hash'] ] );
-    return [ 'site_url' => \ChurchWebsiteConnector\bound_site(), 'integration' => $target['provider'], 'operation' => $operation, 'diff' => $proposal['diff'], 'preview_token' => $token, 'expires_at_utc' => gmdate( 'c', $saved['expires'] ), 'requires_code_execution_acknowledgement' => $saved['code_execution'], 'code_review' => $proposal['code_review'] ?? null, 'message' => $proposal['warning'] ?? 'Preview only. Review the exact diff and approve before applying.' ];
+	if ( 'ws-form' === $target['provider'] && ! bounded_json( $proposal['diff'] ) ) {
+		return error( 'size', 'The form change exceeds the review size limit. Use smaller field or section edits.', 400 );
+	}
+	$saved = array(
+		'target'         => $target,
+		'operation'      => $operation,
+		'state_hash'     => $item['state_hash'],
+		'changes'        => $proposal['changes'],
+		'code_execution' => $proposal['code_execution'] ?? false,
+	);
+	// Rebuild scoped edits from their exact input, never a stale full form design.
+	if ( 'create' !== $operation && ! isset( $changes['design'] ) ) {
+		$saved['request_changes'] = $changes;
+	}
+	$staged = \ChurchWebsiteConnector\RestTools\stage_review( $saved, $replaces, PREVIEW, EXPIRE, TTL, 'church_connector_integration_' );
+	if ( is_wp_error( $staged ) ) {
+		return $staged;
+	}
+	return array(
+		'site_url'                                => \ChurchWebsiteConnector\bound_site(),
+		'integration'                             => $target['provider'],
+		'operation'                               => $operation,
+		'diff'                                    => $proposal['diff'],
+		'requires_code_execution_acknowledgement' => $saved['code_execution'],
+		'code_review'                             => $proposal['code_review'] ?? null,
+		'message'                                 => $proposal['warning'] ?? 'Preview only. Review the exact diff and approve before applying.',
+	) + $staged;
 }
 function load_preview( $token ) {
     if ( ! is_string( $token ) || preg_match( '/\A[a-f0-9]{64}\z/', $token ) !== 1 ) { return error( 'token', 'Use a valid integration preview token.' ); }
     $saved = get_option( stage_name( get_current_user_id() ), false );
     if ( ! is_array( $saved ) || ( $saved['owner'] ?? 0 ) !== get_current_user_id() || ! hash_equals( (string) ( $saved['token_hash'] ?? '' ), hash( 'sha256', $token ) ) ) { return error( 'token', 'This preview is unavailable to the signed-in account.', 403 ); }
-    if ( $saved['expires'] <= time() || $saved['site'] !== \ChurchWebsiteConnector\current_identity() ) { \ChurchWebsiteConnector\RestTools\conditional_delete( stage_name( get_current_user_id() ), $saved ); return error( 'expired', 'The preview expired or the installation address changed.', 409 ); }
+	if ( ! \ChurchWebsiteConnector\RestTools\preview_site_matches( $saved ) ) {
+		return error( 'site', 'The preview belongs to another website configuration.', 403 );
+	}
+	if ( $saved['expires'] <= time() ) {
+		expire( get_current_user_id(), $saved['token_hash'] );
+		return error( 'expired', 'The preview expired.', 409 );
+	}
     return $saved;
 }
 function apply( $input ) {
@@ -171,19 +241,71 @@ function apply( $input ) {
     $target = $saved['target']; $lock = LOCK . substr( fingerprint( $target ), 0, 32 ); $holder = wp_json_encode( [ 'expires' => time() + 120, 'token' => bin2hex( random_bytes( 16 ) ) ] );
     $previous = get_option( $lock, false );
     if ( is_string( $previous ) && ( json_decode( $previous, true )['expires'] ?? PHP_INT_MAX ) < time() ) { \ChurchWebsiteConnector\RestTools\conditional_delete( $lock, $previous ); }
-    if ( ! add_option( $lock, $holder, '', false ) ) { return error( 'locked', 'Another connector request is changing this item. Read it again shortly.', 409 ); }
+	if ( ! \ChurchWebsiteConnector\RestTools\insert_lock( $lock, $holder ) ) {
+		return error( 'locked', 'Another connector request is changing this item. Read it again shortly.', 409 );
+	}
     try {
         $item = read( $target ); if ( is_wp_error( $item ) ) { return $item; }
-        if ( ! hash_equals( $saved['state_hash'], $item['state_hash'] ) ) { return error( 'stale', 'The item or plugin changed after preview. Read it and prepare a new preview.', 409 ); }
+		if ( ! hash_equals( $saved['state_hash'], $item['state_hash'] ) ) {
+			$error = error( 'stale', 'The item or plugin changed after preview.', 409 );
+			if ( ! isset( $saved['request_changes'] ) ) {
+				\ChurchWebsiteConnector\RestTools\retire_preview( $saved, PREVIEW, EXPIRE );
+				return $error;
+			}
+			$request = array(
+				'site_url'    => \ChurchWebsiteConnector\bound_site(),
+				'integration' => $target['provider'],
+				'kind'        => $target['kind'],
+				'id'          => $target['id'],
+				'section'     => $target['section'],
+				'state_hash'  => $item['state_hash'],
+				'operation'   => $saved['operation'],
+				'changes'     => $saved['request_changes'],
+			);
+			return \ChurchWebsiteConnector\RestTools\refreshed_error( $error, preview( $request, $saved ), $saved, PREVIEW, EXPIRE );
+		}
         if ( ! \ChurchWebsiteConnector\RestTools\conditional_delete( stage_name( get_current_user_id() ), $saved ) ) { return error( 'consumed', 'The preview was replaced or already claimed.', 409 ); }
         wp_clear_scheduled_hook( EXPIRE, [ get_current_user_id(), $saved['token_hash'] ] );
         try { $result = match ( $target['provider'] ) { 'seo-framework', 'rank-math' => Seo\write( $target, $item, $saved['operation'], $saved['changes'] ), 'code-snippets' => Snippets\write( $target, $item, $saved['operation'], $saved['changes'] ), 'ws-form' => Forms\write( $target, $item, $saved['operation'], $saved['changes'] ) }; }
         catch ( \Throwable $e ) { $result = error( 'write', 'The plugin did not complete cleanly: ' . $e->getMessage(), 502 ); }
-        $rows = (array) get_option( AUDIT, [] ); array_unshift( $rows, [ 'time_utc' => gmdate( 'c' ), 'user_id' => get_current_user_id(), 'integration' => $target['provider'], 'kind' => $target['kind'], 'id' => $target['id'], 'operation' => $saved['operation'], 'field_names' => array_keys( $saved['changes'] ), 'result' => is_wp_error( $result ) ? 'error' : 'completed' ] ); update_option( AUDIT, array_slice( $rows, 0, 50 ), false );
-        if ( is_wp_error( $result ) ) { return error( 'partial', $result->get_error_message() . ' Inspect the item before retrying; the preview is consumed and changes may have partially completed.', 502 ); }
-        if ( isset( $result['id'] ) ) { $target['id'] = $result['id']; }
-        $after = read( $target ); if ( is_wp_error( $after ) ) { return error( 'readback', 'The operation completed but read-back failed. Inspect before retrying.', 502 ); }
-        return [ 'changed' => true, 'operation' => $saved['operation'], 'item' => public_item( $target, $after ), 'result' => $result ];
+		if ( ! is_wp_error( $result ) && isset( $result['id'] ) ) {
+			$target['id'] = $result['id'];
+		}
+		\ChurchWebsiteConnector\RestTools\append_audit(
+			AUDIT,
+			array(
+				'time_utc'    => gmdate( 'Y-m-d\TH:i:s\Z' ),
+				'user_id'     => get_current_user_id(),
+				'integration' => $target['provider'],
+				'kind'        => $target['kind'],
+				'id'          => $target['id'],
+				'operation'   => $saved['operation'],
+				'field_names' => array_keys( $saved['changes'] ),
+				'result'      => is_wp_error( $result ) ? 'error' : 'completed',
+			)
+		);
+		if ( is_wp_error( $result ) ) {
+			if ( 'church_connector_integration_stale' === $result->get_error_code() ) {
+				return $result;
+			}
+			return error( 'partial', $result->get_error_message() . ' Inspect the item before retrying. The preview was consumed and changes may have partially completed.', 502 );
+		}
+		if ( isset( $result['verified_item'] ) ) {
+			$public = $result['verified_item'];
+			unset( $result['verified_item'] );
+		} else {
+			$after = read( $target );
+			if ( is_wp_error( $after ) ) {
+				return error( 'readback', 'The operation completed but read-back failed. Inspect before retrying.', 502 );
+			}
+			$public = public_item( $target, $after );
+		}
+		return array(
+			'changed'   => true,
+			'operation' => $saved['operation'],
+			'item'      => $public,
+			'result'    => $result,
+		);
     } finally { \ChurchWebsiteConnector\RestTools\conditional_delete( $lock, $holder ); }
 }
 function discard( $input ) {
@@ -219,7 +341,23 @@ function schemas(): array {
     return [
         'integration-capabilities' => [ 'Integration capabilities', 'Read installed versions, switches, supported operations and editable schemas for The SEO Framework, Rank Math, Code Snippets and WS Form Pro. No credentials or submissions.', 'capabilities', $site + $provider, [ 'site_url' ], true ],
         'list-integration-items' => [ 'List integration items', 'List bounded SEO post/page IDs, snippet summaries or form summaries. Snippet code and submission data are omitted from lists.', 'listing', $site + $provider + [ 'page' => [ 'type' => 'integer', 'minimum' => 1, 'maximum' => 10000 ], 'per_page' => [ 'type' => 'integer', 'minimum' => 1, 'maximum' => 50 ], 'post_type' => [ 'type' => 'string', 'enum' => [ 'post', 'page' ] ] ], [ 'site_url', 'integration' ], true ],
-        'get-integration-item' => [ 'Read an integration item', 'Read supported SEO fields/settings, one snippet, or form design and settings, with a state_hash. SEO settings use ID 0; Rank Math also requires section general, titles or sitemap.', 'get_item', $target, [ 'site_url', 'integration', 'kind', 'id' ], true ],
+		'get-integration-item'       => array(
+			'Read an integration item',
+			'Read supported SEO fields/settings, one snippet, or form design and settings, with a state_hash. SEO settings use ID 0. Rank Math also requires section general, titles or sitemap. Large WS Form designs return ordered nodes, design_page and next_design_page. Read the next page with its state_hash.',
+			'get_item',
+			$target + array(
+				'design_page' => array(
+					'type'    => 'integer',
+					'minimum' => 1,
+				),
+				'state_hash'  => array(
+					'type'    => 'string',
+					'pattern' => '^[a-f0-9]{64}$',
+				),
+			),
+			array( 'site_url', 'integration', 'kind', 'id' ),
+			true,
+		),
         'preview-integration-change' => [ 'Preview an integration change', 'Stage one supported integration change without applying it. Read current state_hash first; creation uses ID 0. Use only fields and operations from integration-capabilities. Review code execution and publishing effects before approval.', 'preview', $target + [ 'state_hash' => [ 'type' => 'string', 'pattern' => '^[a-f0-9]{64}$' ], 'operation' => [ 'type' => 'string', 'enum' => [ 'update', 'create', 'activate', 'deactivate', 'trash', 'publish', 'unpublish', 'add_field', 'add_section', 'add_tab', 'update_field', 'update_section', 'update_tab', 'delete_field', 'delete_section', 'delete_tab' ] ], 'changes' => [ 'type' => 'object', 'maxProperties' => 64 ] ], [ 'site_url', 'integration', 'kind', 'id', 'operation' ], false ],
         'apply-integration-change' => [ 'Apply an approved integration change', 'WRITE: apply exactly the signed-in account’s reviewed integration preview. Rechecks website, item, plugin, switches and native permissions. Set approved true only after user approval; code-executing changes additionally require acknowledge_code_execution true. No arbitrary REST routes or submissions.', 'apply', $token + [ 'approved' => [ 'type' => 'boolean', 'const' => true ], 'acknowledge_code_execution' => [ 'type' => 'boolean' ] ], [ 'site_url', 'preview_token', 'approved' ], false ],
         'discard-integration-change' => [ 'Discard an integration preview', 'Discard only the signed-in account’s pending integration preview without changing the plugin item.', 'discard', $token, [ 'site_url', 'preview_token' ], false ],
