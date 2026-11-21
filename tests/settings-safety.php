@@ -13,6 +13,16 @@ function safety_check( $condition, $description ) {
 	}
 	$GLOBALS['cases'][] = $description;
 }
+/** Read the text that is pasted into the assistant, excluding adjacent admin notices. */
+function safety_copied_prompt( string $screen ): string {
+	$tags = new WP_HTML_Tag_Processor( $screen );
+	while ( $tags->next_tag( 'textarea' ) ) {
+		if ( 'cwc-setup-prompt' === $tags->get_attribute( 'id' ) ) {
+			return $tags->get_modifiable_text();
+		}
+	}
+	throw new RuntimeException( 'Missing setup message textarea' );
+}
 function safety_reactivate() {
 	$file = C\Updates\plugin_file();
 	deactivate_plugins( $file );
@@ -58,6 +68,57 @@ $settings = array_replace( $original, array( 'used_css' => false, 'rest_tools' =
 safety_check( true === C\configure( $settings ), 'A changed configuration is saved successfully' );
 $saved = C\settings();
 safety_check( true === C\configure( $saved ) && C\settings() === $saved, 'Submitting identical settings is a successful no-op' );
+
+// Vendor plugins are absent in this fixture. Exercise the actual copy control for each saved route.
+foreach ( array( 'none', 'generatepress', 'separate_connections' ) as $route ) {
+	$route_choices = static function ( $choices ) use ( $route ) {
+		$choices['generatepress_bridge'] = 'generatepress' === $route;
+		$choices['codex'] = 'separate_connections' === $route;
+		return $choices;
+	};
+	add_filter( 'option_' . C\SETTINGS, $route_choices );
+	try {
+		$before_prompt = C\settings();
+		ob_start();
+		C\admin_page();
+		$prompt = safety_copied_prompt( ob_get_clean() );
+		safety_check( $before_prompt === C\settings(), "Copying setup instructions preserves the settings for $route" );
+		safety_check( str_contains( $prompt, 'Settings > Website Connector' ) && ! str_contains( $prompt, 'church-connector/connection-status' ) && ! str_contains( $prompt, '/wp-json/' ), "An unavailable $route connection gives the administrator a next step before client discovery" );
+		if ( 'none' === $route ) {
+			safety_check( str_contains( strtolower( $prompt ), 'disabled' ), 'The copied message identifies an intentionally disabled connection' );
+		} elseif ( 'generatepress' === $route ) {
+			safety_check( str_contains( $prompt, 'GeneratePress' ) && ! str_contains( $prompt, 'use separate named' ), 'A missing GeneratePress provider keeps the selected route' );
+		} else {
+			safety_check( str_contains( $prompt, 'WP Rocket installation' ), 'The unavailable alternative route identifies its missing WP Rocket dependency' );
+		}
+	} finally {
+		remove_filter( 'option_' . C\SETTINGS, $route_choices );
+	}
+}
+
+// Model the providers' ready reports with distinct endpoints to identify which route was recommended.
+$ready_status = C\connection_status();
+$urls = $ready_status['connections'];
+foreach ( array( 'generatepress', 'separate_connections' ) as $route ) {
+	$ready_status['primary_connection'] = array_replace(
+		$ready_status['primary_connection'],
+		array( 'selected' => $route, 'state' => 'generatepress' === $route ? 'ready' : 'separate_connections', 'bridge_ready' => 'generatepress' === $route, 'level' => 'green' )
+	);
+	$prompt = C\setup_prompt( $ready_status );
+	safety_check( str_contains( $prompt, 'Codex desktop' ) && str_contains( $prompt, 'ChatGPT web' ) && str_contains( $prompt, 'church-connector/connection-status' ), "The ready $route prompt distinguishes client support and starts with an identity read" );
+	safety_check( str_contains( $prompt, $urls['generatepress_mcp'] ) && ( 'separate_connections' === $route ) === str_contains( $prompt, $urls['wp_rocket_mcp'] ), "The $route prompt names only its selected connection endpoints" );
+	if ( 'separate_connections' === $route ) {
+		safety_check( str_contains( $prompt, 'authorised for this project' ) && str_contains( $prompt, 'ask which setup to use' ), 'The alternative route requires a decision when the local project requires GeneratePress' );
+	}
+}
+$ready_status['primary_connection']['state'] = 'setup_required';
+$ready_status['dependencies']['wp_rocket_version'] = '3.24.1';
+$ready_status['dependencies']['wp_rocket_oauth'] = false;
+$library_prompt = C\setup_prompt( $ready_status );
+safety_check( str_contains( $library_prompt, 'WP Rocket connection library' ) && ! str_contains( $library_prompt, $urls['wp_rocket_mcp'] ), 'A missing alternative-route OAuth library is identified before sign-in' );
+$ready_status['dependencies']['wp_rocket_oauth'] = true;
+$adapter_prompt = C\setup_prompt( $ready_status );
+safety_check( str_contains( $adapter_prompt, 'MCP Adapter' ) && ! str_contains( $adapter_prompt, $urls['wp_rocket_mcp'] ), 'An alternative connection missing its compatible MCP Adapter gives the administrator that next step' );
 $deny = static fn( $proposed, $old ) => $old;
 $filter = 'pre_update_option_' . C\SETTINGS;
 $requested = array_replace( $saved, array( 'rest_tools' => true ) );
@@ -129,6 +190,18 @@ safety_check( $adapter_before === get_option( C\AdapterSetup\STATE ) && $auto_be
 ob_start();
 C\admin_page();
 $screen = ob_get_clean();
+$copy_prompt = safety_copied_prompt( $screen );
+safety_check( str_contains( $copy_prompt, 'Settings > Website Connector' ) && str_contains( $copy_prompt, 'both the Site Address and WordPress Address' ) && ! str_contains( $copy_prompt, '/wp-json/' ) && ! str_contains( $copy_prompt, 'sign-in' ) && ! str_contains( $copy_prompt, 'church-connector/connection-status' ), 'The copied message for an unbound site prioritises reviewing both addresses before sign-in or discovery' );
+$off_on_copy = static fn( $choices ) => array_replace( $choices, array( 'generatepress_bridge' => false, 'codex' => false ) );
+add_filter( 'option_' . C\SETTINGS, $off_on_copy );
+try {
+	ob_start();
+	C\admin_page();
+	$off_prompt = safety_copied_prompt( ob_get_clean() );
+	safety_check( $copy_prompt === $off_prompt, 'A copied site calls for address review even if both stored connection switches are off' );
+} finally {
+	remove_filter( 'option_' . C\SETTINGS, $off_on_copy );
+}
 $tags = new WP_HTML_Tag_Processor( $screen );
 $checked = array();
 while ( $tags->next_tag( 'input' ) ) {

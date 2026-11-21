@@ -270,6 +270,64 @@ $manual_id = guard_draft( 'post', guard_block( array(), '<a href="https://extern
 $manual = guard_ok( guard_publish_preview( $manual_id ) )['post']['file_blocks'][0];
 guard_assert( empty( $manual['attachment_id'] ) && ! isset( $manual['media_library_pdf'] ) && $manual['link_url'] === 'https://external.example/notice.pdf', 'An unlinked external File block stays available for manual review without a verified hash' );
 
+// A token created before publication previews included wording must require a new decision.
+foreach ( array( 'publish' => 'post', 'publish_page' => 'page', 'schedule' => 'post' ) as $operation => $kind ) {
+	$source     = '<!-- wp:paragraph --><p>Morning worship begins at ten.</p><!-- /wp:paragraph -->';
+	$wording_id = guard_draft( $kind, $source );
+	wp_update_post( array( 'ID' => $wording_id, 'post_excerpt' => 'Sunday service' ) );
+	$schedule = 'schedule' === $operation;
+	$first    = guard_ok(
+		$schedule
+			? guard_call( 'preview-publication-schedule', guard_state( $wording_id ) + array( 'date_local' => $future_local ) )
+			: guard_publish_preview( $wording_id )
+	);
+	$wording = $first['post']['wording_review'];
+	guard_assert( 'inline' === $wording['mode'] && $source === $wording['body_source'] && 'Sunday service' === $wording['excerpt_source'], 'First ' . $operation . ' approval includes the complete short saved wording and excerpt' );
+	$legacy = get_option( $slot );
+	unset( $legacy['publication_wording_reviewed'] );
+	update_option( $slot, $legacy, false );
+	$tool    = $schedule ? 'apply-publication-schedule' : 'apply-draft-publish';
+	$confirm = $schedule ? 'confirm_schedule_change' : 'confirm_publish';
+	$refused = guard_apply( $first, $tool, $confirm );
+	guard_assert( is_wp_error( $refused ) && 'draft' === get_post_status( $wording_id ) && ! wp_next_scheduled( 'publish_future_post', array( $wording_id ) ), 'A legacy ' . $operation . ' approval cannot release unreviewed wording' );
+	guard_assert( is_wp_error( guard_apply( $first, $tool, $confirm ) ), 'Reusing the legacy ' . $operation . ' token cannot release the draft' );
+}
+
+$wording_id = guard_draft( 'post', '<p>Same visitor-facing body throughout.</p>' );
+wp_update_post( array( 'ID' => $wording_id, 'post_excerpt' => 'For the first service.' ) );
+$draft_state = guard_ok( guard_call( 'get-post-workflow', array( 'id' => $wording_id ) ) )['post'];
+$date_review = guard_ok( guard_call( 'preview-draft-date', array( 'id' => $wording_id, 'state_hash' => $draft_state['state_hash'], 'date_local' => wp_date( 'Y-m-d', time() - 3 * DAY_IN_SECONDS ) ) ) );
+guard_assert( ! isset( $date_review['post']['wording_review'] ), 'Separately saving a draft date does not ask for publication wording approval' );
+$first = guard_ok( guard_publish_preview( $wording_id ) );
+wp_update_post( array( 'ID' => $wording_id, 'post_excerpt' => 'For both services.' ) );
+$stale  = guard_apply( $first, 'apply-draft-publish', 'confirm_publish' );
+guard_assert( guard_error( $stale, 'stale' ) && 'draft' === get_post_status( $wording_id ) && 'For both services.' === get_post( $wording_id )->post_excerpt, 'An excerpt-only edit invalidates publication and preserves the independently saved excerpt' );
+$fresh = \ChurchWebsiteConnector\RestTools\review_details( $stale )['refreshed_preview'];
+guard_assert( $first['preview_token'] !== $fresh['preview_token'] && 'For both services.' === $fresh['post']['wording_review']['excerpt_source'] && '<p>Same visitor-facing body throughout.</p>' === $fresh['post']['wording_review']['body_source'], 'After an excerpt-only edit the fresh approval contains the new excerpt and current body' );
+
+$ran_shortcode = false;
+add_shortcode(
+	'wording_test',
+	static function () use ( &$ran_shortcode ) {
+		$ran_shortcode = true;
+		return 'WordPress rendered this shortcode';
+	}
+);
+try {
+	$complex_id = guard_draft( 'post', '[wording_test]' );
+	wp_update_post( array( 'ID' => $complex_id, 'post_excerpt' => 'Service details' ) );
+	$complex = guard_ok( guard_publish_preview( $complex_id ) )['post']['wording_review'];
+	guard_assert( ! $ran_shortcode && 'wordpress' === $complex['mode'] && ! isset( $complex['body_source'] ) && 'Service details' === $complex['excerpt_source'], 'A shortcode draft directs the user to WordPress without executing the shortcode or claiming its source is visitor-facing wording' );
+	guard_assert( get_preview_post_link( $complex_id ) === $complex['preview_url'] && get_edit_post_link( $complex_id, 'raw' ) === $complex['edit_url'], 'Complex wording links to the exact native preview and editor for the draft' );
+} finally {
+	remove_shortcode( 'wording_test' );
+}
+
+$long_excerpt_id = guard_draft( 'post', '<p>Short body</p>' );
+wp_update_post( array( 'ID' => $long_excerpt_id, 'post_excerpt' => str_repeat( 'Additional detail. ', 2000 ) ) );
+$long_excerpt = guard_ok( guard_publish_preview( $long_excerpt_id ) )['post']['wording_review'];
+guard_assert( 'wordpress' === $long_excerpt['mode'] && ! isset( $long_excerpt['excerpt_source'] ) && ! isset( $long_excerpt['body_source'] ) && get_preview_post_link( $long_excerpt_id ) === $long_excerpt['preview_url'], 'A long excerpt on a short post stays out of the response and points to the complete WordPress review' );
+
 $notice = guard_draft( 'post', '<p>The fair opens at 11am.</p>' );
 $first  = guard_ok( guard_publish_preview( $notice ) );
 wp_update_post( array( 'ID' => $notice, 'post_content' => '<p>The fair has been cancelled.</p>' ) );
@@ -280,6 +338,8 @@ guard_ok( guard_apply( $latest, 'apply-draft-publish', 'confirm_publish' ) );
 
 $notice = guard_draft( 'page', str_repeat( 'Paragraph ', 2000 ) );
 $first  = guard_ok( guard_call( 'preview-publication-schedule', guard_state( $notice ) + array( 'date_local' => $future_local ) ) );
+$long   = $first['post']['wording_review'];
+guard_assert( 'wordpress' === $long['mode'] && ! isset( $long['body_source'] ) && get_preview_post_link( $notice ) === $long['preview_url'], 'First scheduling review of a lengthy page links to its full native preview instead of returning truncated wording' );
 wp_update_post( array( 'ID' => $notice, 'post_content' => 'Short final text' ) );
 $stale = guard_apply( $first, 'apply-publication-schedule', 'confirm_schedule_change' );
 $issue = \ChurchWebsiteConnector\RestTools\review_details( $stale );
@@ -323,6 +383,8 @@ $outer = wp_insert_post( wp_slash( array( 'post_type' => 'wp_block', 'post_statu
 $shared_page = wp_insert_post( wp_slash( array( 'post_type' => 'page', 'post_status' => 'draft', 'post_title' => 'Shared pattern test', 'post_content' => $pattern_ref( $outer ) ) ) );
 $pattern_state = guard_state( $shared_page );
 $preview = guard_ok( guard_publish_preview( $shared_page ) );
+$wording = $preview['post']['wording_review'];
+guard_assert( 'wordpress' === $wording['mode'] && ! isset( $wording['body_source'] ) && get_preview_post_link( $shared_page ) === $wording['preview_url'], 'A short page containing nested synced content directs the user to its native preview' );
 $patterns = array_column( $preview['post']['synced_patterns'], null, 'id' );
 guard_assert( array() === $preview['post']['file_blocks'] && $current['id'] === $patterns[ $nested ]['file_blocks'][0]['media_library_pdf']['attachment_id'], 'Nested shared patterns identify the verified PDF and keep its index local to its source pattern' );
 wp_update_post( wp_slash( array( 'ID' => $nested, 'post_content' => $valid . '<p>Additional shared notice</p>' ) ) );
@@ -349,6 +411,7 @@ wp_update_post( array( 'ID' => $nested, 'post_status' => 'publish' ) );
 $cancel_id = guard_scheduled( 'page', time() + 2 * DAY_IN_SECONDS );
 wp_update_post( wp_slash( array( 'ID' => $cancel_id, 'post_content' => $pattern_ref( 99999999 ) ) ) );
 $cancel = guard_ok( guard_call( 'preview-cancel-schedule', guard_state( $cancel_id ) ) );
+guard_assert( ! isset( $cancel['post']['wording_review'] ), 'Stopping an existing schedule does not ask the user to approve wording for publication' );
 guard_ok( guard_apply( $cancel, 'apply-publication-schedule', 'confirm_schedule_change' ) );
 guard_assert( 'draft' === get_post_status( $cancel_id ) && ! wp_next_scheduled( 'publish_future_post', array( $cancel_id ) ), 'A broken synced reference does not prevent stopping an existing publication schedule' );
 $shared_good = guard_ok( guard_publish_preview( $shared_page ) );

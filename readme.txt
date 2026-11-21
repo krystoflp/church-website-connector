@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.13.5
+Stable tag: 1.13.6
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -49,7 +49,10 @@ connections are not revoked by these switches.
 
 Settings > Website Connector supplies both native MCP addresses and the
 GeneratePress authorisation-server metadata address. Its copyable setup message
-reflects the saved connection method, with unavailable setup reported separately. Readiness checks do not prove
+gives the next step for the installation. It asks for address confirmation or
+missing setup when needed. Once ready, it gives the selected connection and
+identity check. Codex desktop is the tested client. ChatGPT web support is
+unverified. Readiness checks do not prove
 that sign-in, client discovery or an upload has completed successfully.
 
 == Installation and updates ==
@@ -240,7 +243,10 @@ Supported and locally tested native plugins:
   submit_on_enter and invalid_field_focus. Existing actions/conditionals remain
   server-side; native deletion repairs references to removed design items. Submission responses, exports, resend actions,
   notification credentials, licence settings and global WS Form options are not
-  exposed. Each design preview explains whether applying it saves a draft or
+  exposed. An explicit publication preview names the form and links to its WS Form
+  editor. Review the actions, notification destinations, conditional rules and other
+  native settings there before approving publication of the complete saved draft.
+  Each design preview explains whether applying it saves a draft or
   publishes a change to the current public form. Automatic edits stop if the form already has unpublished changes. Save draft edits with automatic publication off, or review and explicitly publish the pending draft first. A change
   to automatic publication requires a fresh preview for a published form. Editing it
   with automatic publication enabled requires native publish_form permission.
@@ -526,8 +532,11 @@ PDF replacement preview with the attachment ID and a descriptive plain-text labe
 Use the next state_hash to preview and save the site-local date. A date-only value
 means midnight. Saving a date keeps the post a draft.
 
-When ready, preview publication separately, review the title, ID, date and File
-block links, then explicitly confirm publication. An explicit current or past date
+When ready, preview publication separately. Review the title, ID, date and File
+block links. Before publishing or scheduling, show the complete wording of a short
+draft and any saved excerpt. For a long or complex draft, give the signed-in
+WordPress preview link and identify what to check. The editor also displays the
+saved excerpt. Obtain explicit approval for this review. An explicit current or past date
 is required for immediate publication. Use the separate scheduling workflow
 for future dates.
 Read back the published status, date, category and permalink. Connector previews
@@ -556,6 +565,12 @@ adds filtered rule search, exact-path log counts, group management, selected
 batches, reviewed matching defaults and portable plain-rule import/export.
 
 == Changelog ==
+
+= 1.13.6 =
+
+* Include the saved wording and excerpt in publication and scheduling reviews. Long or complex drafts link to the WordPress preview. Earlier publication approvals require a fresh review.
+* Name the exact form and link to its native editor for review of actions, notification destinations, conditional rules and other settings before explicit WS Form publication.
+* Give the next available step in the copied setup message, including address confirmation after upgrades or site moves, dependency setup and the tested client.
 
 = 1.13.5 =
 
