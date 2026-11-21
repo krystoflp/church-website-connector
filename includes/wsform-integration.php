@@ -371,7 +371,31 @@ function prepare( array $target, array $item, string $operation, array $changes 
     }
     if ( in_array( $operation, [ 'publish', 'unpublish' ], true ) ) {
         if ( $changes ) { return I\error( 'fields', 'Publishing operations do not accept design changes.' ); }
-        return [ 'changes' => [], 'diff' => [ 'publication' => [ 'before' => [ 'status' => $item['data']['status'], 'state_hash' => I\fingerprint( $item['state'] ) ], 'after' => $operation === 'publish' ? 'Publish the current draft design' : 'Remove the published form; retain its draft design' ] ], 'warning' => 'This changes the form available to visitors. Review the complete current design before approving.' ];
+		$publication = array(
+			'before' => array(
+				'status'     => $item['data']['status'],
+				'state_hash' => I\fingerprint( $item['state'] ),
+			),
+			'after'  => 'Remove the published form; retain its draft design',
+		);
+		$warning     = 'Unpublishing removes the visitor-facing form and keeps its draft.';
+		if ( 'publish' === $operation ) {
+			$publication['after']  = 'Publish the current draft design';
+			$publication['review'] = array(
+				'form_id'           => $target['id'],
+				'form_label'        => $item['data']['label'],
+				'edit_url'          => admin_url( 'admin.php?page=ws-form-edit&id=' . $target['id'] ),
+				'connector_shows'   => array( 'Form title, tabs, sections and fields', 'Selected form settings: label_render_off, submit_on_enter, invalid_field_focus' ),
+				'review_in_ws_form' => array( 'Actions, including notification destinations', 'Conditional rules', 'Other native form and field settings' ),
+			);
+
+			$warning = 'This publishes the entire saved draft. Show the form name, ID and editor link. Use get-integration-item for its layout and supported settings. Ask the user to check actions, notification destinations, conditional rules and other native settings in that editor before approving publication.';
+		}
+		return array(
+			'changes' => array(),
+			'diff'    => array( 'publication' => $publication ),
+			'warning' => $warning,
+		);
     }
 	$publication = 'publish' === $item['data']['status'] && $item['data']['auto_publish']
 		? 'Applying this edit immediately publishes the reviewed change to the current public form.'

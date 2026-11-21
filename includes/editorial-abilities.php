@@ -87,13 +87,13 @@ function register(): void {
 		),
 		'preview-page-publication'     => array(
 			'Preview immediate public publication of a draft page',
-			'Set kind page and choose a current or past site-local date. Show the exact website, page, date and File blocks to the user for explicit confirmation. Use apply-draft-publish only after approval.',
+			'Set kind page and choose a current or past site-local date. Follow wording_review for the complete wording and saved excerpt. Show the website, page, date and File blocks for explicit confirmation before apply-draft-publish.',
 			'Editorial\preview_page',
 			array_replace( $state, array( 'kind' => $text + array( 'enum' => array( 'page' ) ) ) ) + array( 'date_local' => $date ),
 		),
 		'preview-publication-schedule' => array(
 			'Preview scheduling or rescheduling a post or page',
-			'Choose a draft or scheduled post or page and a future site-local date and time. Show the exact item, old and new dates, timezone and File blocks before approval.',
+			'Choose a draft or scheduled post or page and a future site-local date and time. Follow wording_review for the complete wording and saved excerpt. Show the item, old and new dates, timezone and File blocks before approval.',
 			'Editorial\preview_schedule',
 			$state + array( 'date_local' => $date ),
 		),

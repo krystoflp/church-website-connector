@@ -202,6 +202,9 @@ function preview( $input, ?array $replaces = null ) {
 		'changes'        => $proposal['changes'],
 		'code_execution' => $proposal['code_execution'] ?? false,
 	);
+	if ( 'ws-form' === $target['provider'] && 'publish' === $operation ) {
+		$saved['form_publication_scope_reviewed'] = true;
+	}
 	// Rebuild scoped edits from their exact input, never a stale full form design.
 	if ( 'create' !== $operation && ! isset( $changes['design'] ) ) {
 		$saved['request_changes'] = $changes;
@@ -246,8 +249,9 @@ function apply( $input ) {
 	}
     try {
         $item = read( $target ); if ( is_wp_error( $item ) ) { return $item; }
-		if ( ! hash_equals( $saved['state_hash'], $item['state_hash'] ) ) {
-			$error = error( 'stale', 'The item or plugin changed after preview.', 409 );
+		$old_form_review = 'ws-form' === $target['provider'] && 'publish' === $saved['operation'] && empty( $saved['form_publication_scope_reviewed'] );
+		if ( $old_form_review || ! hash_equals( $saved['state_hash'], $item['state_hash'] ) ) {
+			$error = error( 'stale', $old_form_review ? 'Review the form and its native settings using the updated publication preview.' : 'The item or plugin changed after preview.', 409 );
 			if ( ! isset( $saved['request_changes'] ) ) {
 				\ChurchWebsiteConnector\RestTools\retire_preview( $saved, PREVIEW, EXPIRE );
 				return $error;

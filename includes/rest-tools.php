@@ -207,18 +207,26 @@ function raw_text( mixed $value ): string {
     return is_array( $value ) ? (string) ( $value['raw'] ?? '' ) : ( is_string( $value ) ? $value : '' );
 }
 
-function read_item( string $kind, int $id ) {
+function read_item( string $kind, int $id, bool $for_publication_workflow = false ) {
     // Check before dispatch too, including when callbacks are invoked directly.
     if ( ! current_user_can( 'edit_post', $id ) ) {
         return error( 'forbidden', 'Your WordPress account cannot edit this item.', 403 );
     }
-    $data = dispatch( 'GET', route( $kind, $id ), [ 'context' => 'edit' ] );
+	$query = array( 'context' => 'edit' );
+	if ( $for_publication_workflow ) {
+		// Core renders shortcodes for content and runs excerpt filters even for excerpt.raw.
+		$query['_fields'] = implode( ',', array_merge( array( 'id', 'title.raw' ), array_diff( fields( $kind ), array( 'title', 'excerpt' ) ) ) );
+	}
+	$data = dispatch( 'GET', route( $kind, $id ), $query );
     if ( is_wp_error( $data ) ) { return $data; }
     $post = get_post( $id );
     $expected_type = $kind === 'media' ? 'attachment' : $kind;
     if ( ! $post || $post->post_type !== $expected_type || ( $data['id'] ?? null ) !== $id || $post->post_status === 'trash' ) {
         return error( 'target', 'The item does not match the requested kind or is in the trash.', 404 );
     }
+	if ( $for_publication_workflow && post_type_supports( $kind, 'excerpt' ) ) {
+		$data['excerpt'] = $post->post_excerpt;
+	}
     $values = [];
     foreach ( fields( $kind ) as $field ) {
         if ( array_key_exists( $field, $data ) ) {

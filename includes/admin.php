@@ -350,6 +350,49 @@ function field( string $id, string $label, string $value ): void {
 	echo '<input class="large-text" id="' . esc_attr( $id ) . '" type="text" readonly value="' . esc_attr( $value ) . '"></p>';
 }
 
+/** The copied message must make sense even when the WordPress status screen is out of view. */
+function setup_prompt( array $status ): string {
+	$route  = $status['primary_connection'];
+	$deps   = $status['dependencies'];
+	$urls   = $status['connections'];
+	$intro  = 'Church Website Connector ' . VERSION . ' on ' . $status['current_site_url'] . ".\n";
+	$intro .= "Codex desktop is the tested client. ChatGPT web support is unverified. Keep passwords, tokens and licence keys out of chat.\n\n";
+
+	if ( 'website_review_required' === $route['state'] ) {
+		return $intro . 'The connector is paused for website review. Ask the administrator to open Settings > Website Connector and check both the Site Address and WordPress Address against the intended installation. If both are correct, use “Confirm this address and keep my settings” when offered, or review and save the settings on that page. If either address is unexpected, stop and report the mismatch. Then copy the updated message.';
+	}
+	if ( 'connections_disabled' === $route['state'] ) {
+		return $intro . 'Both connection options are disabled. Before attempting new Codex access to the additional tools, ask whether the administrator wants to enable the single GeneratePress connection or the alternative WP Rocket connection in Settings > Website Connector. GeneratePress authoring is independent. Existing authorised connections are not revoked. After a change, copy the updated message.';
+	}
+	$primary = 'generatepress' === $route['selected'];
+	if ( 'setup_required' === $route['state'] ) {
+		if ( $primary ) {
+			$step = match ( true ) {
+				! $deps['wordpress_abilities'] => 'Check the WordPress Abilities API and the supported WordPress version.',
+				! $deps['generatepress_ai_version'] => 'Complete GeneratePress AI installation and activation.',
+				! GeneratePressBridge\supported_version( $deps['generatepress_ai_version'] ) => 'Review the supported GeneratePress AI version.',
+				! $deps['mcp_adapter'] => 'Complete MCP Adapter setup.',
+				false === $deps['generatepress_license_cached_active'] => 'Review the GeneratePress AI licence in WordPress.',
+				default => 'Review the MCP Adapter compatibility and native GeneratePress server registration in Status.',
+			};
+		} else {
+			$step = match ( true ) {
+				! $deps['wp_rocket_version'] => 'Review WP Rocket installation and activation for the selected alternative connection.',
+				! $deps['wp_rocket_oauth'] => 'Review the native WP Rocket connection library.',
+				default => 'Complete setup of a compatible MCP Adapter for WP Rocket.',
+			};
+		}
+		return $intro . 'The selected ' . ( $primary ? 'GeneratePress' : 'WP Rocket' ) . ' connection needs setup. ' . $step . ' Ask the administrator to check Settings > Website Connector, resolve the indicated issue, then copy the updated message. Keep the selected connection method.';
+	}
+
+	if ( $primary ) {
+		$method = "Use the single primary connection for GeneratePress authoring, enabled connector features and available WP Rocket tools.\nGeneratePress MCP: " . $urls['generatepress_mcp'] . "\nAuthorization-server metadata: " . $urls['generatepress_oauth_metadata'] . "\nGeneratePress issues a non-expiring, revocable key. Keep it in macOS Keychain or the client’s secure credential store.";
+	} else {
+		$method = "This site selects the separate WP Rocket connection for connector and cache tools. Use this route if it is authorised for this project. If the project requires GeneratePress as its sole connection, report the difference and ask which setup to use. GeneratePress supplies its own authoring tools.\nWP Rocket MCP: " . $urls['wp_rocket_mcp'] . "\nGeneratePress MCP: " . $urls['generatepress_mcp'] . "\nGeneratePress authorization-server metadata: " . $urls['generatepress_oauth_metadata'];
+	}
+	return $intro . $method . "\n\n" . 'Reuse the existing connection for this exact website when available. For a new connection, let the user complete native OAuth sign-in and consent. On the selected connector route call church-connector/connection-status with {} and compare both returned site addresses with the intended website. Stop on a mismatch. Discover the tools needed for the task. After an update, refresh a stale tool list and verify again. For an authorised PDF upload, check church-connector/upload-pdf and its size limit, then return the public file URL. Metadata and Redirection edits require reviewed previews. Use read-only checks for setup. Report authentication errors without changing the site or broadening permissions.';
+}
+
 function admin_page(): void {
 	if ( is_wp_error( status_permission() ) ) {
 		wp_die( 'An administrator must open this page.', '', array( 'response' => 403 ) );
@@ -436,14 +479,7 @@ function admin_page(): void {
 	field( 'cwc-gp-url', $bridge_selected ? 'Primary MCP server — GeneratePress' : 'GeneratePress MCP server', $urls['generatepress_mcp'] );
 	field( 'cwc-gp-oauth', 'GeneratePress OAuth metadata', $urls['generatepress_oauth_metadata'] );
 	field( 'cwc-rocket-url', $mcp_disabled ? 'WP Rocket MCP server — Codex sign-in option is disabled' : ( $bridge_selected ? 'Alternative WP Rocket MCP server' : 'WP Rocket MCP server (separate connection)' ), $urls['wp_rocket_mcp'] );
-	$prompt = "Help me connect this exact website using its native HTTP MCP servers and OAuth sign-in.\n\nWebsite: " . $status['current_site_url'] . "\nGeneratePress MCP: " . $urls['generatepress_mcp'] . "\nGeneratePress authorization-server metadata: " . $urls['generatepress_oauth_metadata'] . "\nWP Rocket MCP: " . $urls['wp_rocket_mcp'] . "\n\nChurch Website Connector " . VERSION . ' is installed. Its GeneratePress tool bridge is off or unavailable, so use separate named GeneratePress and WP Rocket connections. Reuse existing connections for this exact website where possible. Let me complete native website sign-in and consent. Start with church-connector/connection-status through the WP Rocket connection, verify the exact website, and discover only the tools needed. Check PDF upload readiness and whether church-connector/upload-pdf is available. For authorised PDF uploads, use that tool, respect the reported size limit, and return the public file URL. Updates to existing metadata and Redirection rules need their reviewed previews; new PDF uploads do not use metadata preview tokens. Do not upload files, edit content or clear caches as a connection test. Rediscover tools after an update; if the client retains an old list, refresh or restart it and verify again. Keep passwords, tokens and licence keys out of chat. Report authentication errors without weakening native verification or permissions.';
-	if ( $bridge_selected ) {
-		$prompt = "Connect this exact website through its native GeneratePress AI HTTP MCP server and OAuth sign-in.\n\nWebsite: " . $status['current_site_url'] . "\nPrimary MCP server: " . $urls['generatepress_mcp'] . "\nAuthorization-server metadata: " . $urls['generatepress_oauth_metadata'] . "\n\nChurch Website Connector " . VERSION . ( $bridge_ready ? ' has its compatible tool bridge enabled.' : ' selects GeneratePress as the primary connection; complete its setup or resolve its compatibility warning before using the extra tools.' ) . ' Use this single primary connection for GeneratePress, enabled connector features (including PDF uploads) and WP Rocket tools. Do not create a separate WP Rocket connection for those tools. Reuse an existing connection for this exact website where possible. GeneratePress issues a non-expiring, revocable key; keep it in macOS Keychain or the client’s secure credential store. Use native website sign-in and consent. Start with church-connector/connection-status, verify the exact website and discover only the tools needed through this same connection. Check PDF upload readiness and whether church-connector/upload-pdf is available. For authorised PDF uploads, use that tool, respect the reported size limit, and return the public file URL. Updates to existing metadata and Redirection rules need their reviewed previews; new PDF uploads do not use metadata preview tokens. Do not upload files, edit content or clear caches as a connection test. Rediscover tools after an update; if the client retains an old list, refresh or restart it and verify again. Keep passwords, tokens and licence keys out of chat. Preserve native authentication and permissions.';
-	}
-	if ( $mcp_disabled ) {
-		$prompt = 'Church Website Connector ' . VERSION . ' is installed on ' . $status['current_site_url'] . ', but both connection options are disabled. Before attempting new Codex access to the additional WordPress and plugin tools through MCP, ask me to enable the single GeneratePress connection (recommended), or alternative WP Rocket Codex sign-in, in Settings → Website Connector. Then use the updated connection instructions and complete native sign-in and consent. GeneratePress’s own authoring connection is independent. Existing authorised connections are not revoked by these switches. Do not create new credentials or use direct REST access as a workaround. Do not edit content, upload files or clear caches as a connection test. Keep credentials out of chat.';
-	}
-	echo '<p><label for="cwc-setup-prompt"><strong>Copy this message into your website project chat</strong></label></p><textarea class="large-text" id="cwc-setup-prompt" rows="12" readonly>' . esc_textarea( $prompt ) . '</textarea>';
+	echo '<p><label for="cwc-setup-prompt"><strong>Copy this message into your website project chat</strong></label></p><textarea class="large-text" id="cwc-setup-prompt" rows="12" readonly>' . esc_textarea( setup_prompt( $status ) ) . '</textarea>';
 	echo '<p>The tested client is native Codex desktop. The Codex trust helper above applies to the separate WP Rocket route; the primary connection uses GeneratePress’s native sign-in. Other clients must support the selected provider’s OAuth flow. This page checks local readiness, not completed sign-in, tool discovery or a successful upload.</p>';
 	echo '<h2 id="cwc-update-check">Automatic updates</h2><p>Updates are available from the connector’s published GitHub releases. To receive them automatically, open <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Installed Plugins</a> and review the auto-update setting for Church Website Connector. New installations select it once when website policy permits. Your website’s update policy and schedule apply.</p>';
 	Updates\render_check();

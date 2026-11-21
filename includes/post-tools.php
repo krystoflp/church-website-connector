@@ -25,7 +25,7 @@ function permission( $input = null ): true|\WP_Error {
 
 /** Read the native edit view and guard the complete relevant stored post state. */
 function snapshot( int $id, string $kind = 'post', bool $editorial = false ): array|\WP_Error {
-	$item = RestTools\read_item( $kind, $id );
+	$item = RestTools\read_item( $kind, $id, true );
 	if ( is_wp_error( $item ) ) {
 		return $item;
 	}
@@ -338,6 +338,45 @@ function preview( string $operation, $input, array $keys, bool $editorial = fals
 	return prepare_review( $operation, $state, $parameters );
 }
 
+/** Return saved source for short, static wording. Never execute draft blocks or shortcodes to build a review. */
+function publication_wording( \WP_Post $post ): array {
+	$body    = $post->post_content;
+	$excerpt = $post->post_excerpt;
+	$review  = array(
+		'mode'        => 'wordpress',
+		'preview_url' => get_preview_post_link( $post ),
+		'edit_url'    => get_edit_post_link( $post->ID, 'raw' ),
+	);
+	if ( strlen( $excerpt ) > 2000 ) {
+		return $review;
+	}
+	$review['excerpt_source'] = $excerpt;
+	if ( strlen( $body ) + strlen( $excerpt ) > 4000 || str_contains( $body . $excerpt, '[' ) ) {
+		return $review;
+	}
+	$blocks = parse_blocks( $body . "\n" . $excerpt );
+	while ( $blocks ) {
+		$block = array_pop( $blocks );
+		if ( ! in_array( $block['blockName'], array( null, 'core/paragraph', 'core/heading', 'core/list', 'core/list-item', 'core/file' ), true )
+			|| ! empty( $block['attrs']['metadata']['bindings'] ) ) {
+			return $review;
+		}
+		array_push( $blocks, ...$block['innerBlocks'] );
+	}
+	$html = new \WP_HTML_Tag_Processor( $body . "\n" . $excerpt );
+	while ( $html->next_tag() ) {
+		if ( 'OBJECT' === $html->get_tag() && 'application/pdf' === $html->get_attribute( 'type' ) ) {
+			continue;
+		}
+		if ( ! in_array( $html->get_tag(), array( 'P', 'BR', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'LI', 'B', 'I', 'STRONG', 'EM', 'A', 'SPAN', 'DIV' ), true ) ) {
+			return $review;
+		}
+	}
+	$review['mode']        = 'inline';
+	$review['body_source'] = $body;
+	return $review;
+}
+
 /** Reuse the normal plan and staging path for a fresh preview or a proposed correction. */
 function prepare_review( string $operation, array $state, array $parameters, ?array $replaces = null ): array|\WP_Error {
 	$plan = plan( $operation, $state, $parameters );
@@ -349,6 +388,8 @@ function prepare_review( string $operation, array $state, array $parameters, ?ar
 	$body_guard  = array();
 	$comparison  = null;
 	if ( $publication ) {
+		$body_guard['publication_wording_reviewed'] = true;
+
 		$patterns = wp_list_pluck( $state['review']['synced_patterns'] ?? array(), 'content_hash', 'id' );
 		if ( null !== $replaces && ( $replaces['publication_patterns'] ?? array() ) !== $patterns ) {
 			return RestTools\error( 'pattern_review', 'A referenced synced pattern changed. Review its current content in WordPress, then prepare a new publication preview.', 409 );
@@ -395,6 +436,14 @@ function prepare_review( string $operation, array $state, array $parameters, ?ar
 	if ( is_wp_error( $saved ) ) {
 		return $saved;
 	}
+	$message = 'Preview only. Review the exact change with the user before applying. A new preview replaces your previous post or metadata preview.';
+	if ( $publication ) {
+		$plan['review']['wording_review'] = publication_wording( $state['post'] );
+
+		$message .= 'inline' === $plan['review']['wording_review']['mode']
+			? ' Show the complete saved wording and any saved excerpt in readable form, together with the publication details, before asking for approval.'
+			: ' Give the user the signed-in WordPress preview link to check the complete draft, including embedded or shared content. Show any supplied excerpt. Use the editor link to check the saved excerpt or if the preview is unavailable. Ask for approval of that review.';
+	}
 	if ( null !== $comparison ) {
 		$plan['review']['body_comparison'] = $comparison;
 	}
@@ -402,7 +451,7 @@ function prepare_review( string $operation, array $state, array $parameters, ?ar
 		'site_url'  => Connector\bound_site(),
 		'operation' => $operation,
 		'post'      => $plan['review'],
-		'message'   => 'Preview only. Review the exact change with the user before applying. A new preview replaces your previous post or metadata preview.' . ( empty( $plan['review']['synced_patterns'] ) ? '' : ' Review the File blocks in each named synced pattern as well as the post’s own File blocks.' ),
+		'message'   => $message . ( empty( $plan['review']['synced_patterns'] ) ? '' : ' Review the File blocks in each named synced pattern as well as the post’s own File blocks.' ),
 	) + $saved;
 }
 
@@ -489,6 +538,10 @@ function apply( $input, string $approval, array $operations ): array|\WP_Error {
 			return $state;
 		}
 		if ( ! hash_equals( $saved['state_hash'], $state['review']['state_hash'] ) ) {
+			return refresh_review( $operation, $state, $saved );
+		}
+		// Pre-upgrade publication previews did not ask the user to review the wording.
+		if ( in_array( $operation, array( 'publish', 'publish_page', 'schedule' ), true ) && empty( $saved['publication_wording_reviewed'] ) ) {
 			return refresh_review( $operation, $state, $saved );
 		}
 		$plan = plan( $operation, $state, $saved['changes'] );
@@ -715,13 +768,13 @@ function register_abilities(): void {
 		),
 		'preview-draft-publish'   => array(
 			'Preview immediate public publication of a draft',
-			'Preview publishing one draft immediately using its saved current or past site-local date. Show the exact website, post ID, title, category IDs, date and File blocks to the user. Obtain an explicit instruction to publish this preview.',
+			'Preview publishing one draft immediately using its saved site-local date. Follow wording_review for the complete wording and saved excerpt. Show the site, post ID, title, categories, date and File blocks. Obtain explicit approval for this preview.',
 			'preview_publish',
 			$state,
 		),
 		'apply-draft-publish'     => array(
 			'Publish the explicitly confirmed draft post or page',
-			'PUBLISH: Immediately publish the exact draft post or page in an approved publication preview. Requires explicit confirmation of the post, saved date and PDF where present. Rechecks current WordPress permissions and reviewed state. Returns the verified published post and permalink.',
+			'PUBLISH: Immediately publish the exact draft post or page after approval of the wording, any saved excerpt, publication date and files shown in its preview. Rechecks current WordPress permissions and reviewed state. Returns the verified published item and permalink.',
 			'apply_publish',
 			$apply + array( 'confirm_publish' => $approve ),
 		),

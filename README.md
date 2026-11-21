@@ -14,7 +14,11 @@ Rocket product. Vendor plugins and commercial licences are separate.
    [Releases](https://github.com/krystoflp/church-website-connector/releases).
 2. In WordPress, open **Plugins → Add Plugin → Upload Plugin**. Upload the ZIP,
    activate it, or replace the existing connector when upgrading.
-3. Open **Settings → Website Connector** and follow its connection guidance.
+3. Open **Settings → Website Connector**. On an upgrade from older address
+   records or after copying a site, review both the Site Address and WordPress
+   Address. Confirm only once you recognise this installation. The copied setup
+   message identifies any remaining prerequisite and the selected connection.
+   Codex desktop is the tested client. ChatGPT web support is unverified.
 4. New 1.7.3 installations select automatic updates once. For an existing installation,
    on **Plugins → Installed Plugins**, choose **Enable auto-updates** for Church
    Website Connector. WordPress's normal schedule and hosting policy apply.
@@ -55,8 +59,21 @@ Choose the integrations in **Settings → Website Connector**, then
 refresh your connection. The SEO Framework and Rank Math cover individual SEO
 fields and selected site-wide settings, including sitemaps. Code Snippets Free
 supports reviewed management; new snippets stay inactive, and activation or
-active-code edits require explicit code-execution approval. WS Form Pro covers
-form design and selected per-form settings, with separate draft/publish steps.
+active-code edits require explicit code-execution approval.
+
+WS Form Pro creates new forms as drafts. Publishing a new form requires separate
+approval. For an already published form, the effect of approving an edit depends
+on the native automatic publication setting.
+
+- With automatic publication off, the edit updates the draft. Visitors continue
+  to see the previously published form until the draft is explicitly published.
+- With automatic publication on, an approved edit to a form whose draft matches
+  its public version goes live immediately. If the form has earlier unpublished
+  changes, the connector stops the edit and links to the form in WordPress.
+
+Explicit publication makes the entire current draft live. Check actions,
+notification destinations, conditional rules and other native settings in the
+linked WS Form editor before approving.
 Submission records, notification credentials and licence settings are excluded.
 
 All changes use a current-state read, a concrete preview and a short-lived,
@@ -316,7 +333,10 @@ the inline preview configuration. Review `preview-draft-date` with a site-local
 date or time. Apply either approved edit using `apply-post-edit`.
 
 To publish a draft with a saved current or past date, use
-`preview-draft-publish` and review the post, date and PDFs. Then use
+`preview-draft-publish` and review the post, date and PDFs. For publication
+or scheduling, show the complete wording and any saved excerpt from a short
+draft. For a long or complex draft, give the signed-in WordPress preview link
+and identify what to check. The editor also displays the saved excerpt. Then use
 `apply-draft-publish` with explicit confirmation. These tools require the
 connector's GeneratePress bridge and REST-backed features. Native permissions,
 expiry, current-state checks and read-back apply.
