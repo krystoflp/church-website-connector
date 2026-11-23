@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from urllib.request import urlopen
@@ -40,6 +41,7 @@ def future_zip(archive, target, version, future_version):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--cli', default='wp-playground-cli')
+    parser.add_argument('--editor-chrome', help='Check saved PDF blocks in this Chrome or Chromium executable')
     args = parser.parse_args()
     wp = latest_wordpress()
     header = (ROOT / (SLUG + '.php')).read_text()
@@ -64,7 +66,7 @@ def main():
         blueprint = json.loads(template.replace('__CONNECTOR_VERSION__', version)
                                .replace('__CONNECTOR_ZIP_SHA256__', digest))
         blueprint['preferredVersions'] = {'wp': wp, 'php': '8.3'}
-        for name in ['styled-overlay.php', 'publication-guards.php', 'metadata-guards.php', 'settings-safety.php', 'used-css-grants.php', 'maintenance-integration.php', 'updates-integration.php']:
+        for name in ['styled-overlay.php', 'publication-guards.php', 'pdf-editor-integration.php', 'metadata-guards.php', 'settings-safety.php', 'used-css-grants.php', 'maintenance-integration.php', 'updates-integration.php']:
             code = (tests / name).read_text().replace('__CURRENT_VERSION__', version).replace('__FUTURE_VERSION__', future)
             if name == 'used-css-grants.php':
                 code = code.replace('<?php', "<?php define('CWC_TEST_USED_CSS_GRANTS', true);", 1)
@@ -76,6 +78,10 @@ def main():
                         '--define-bool', 'WP_DEBUG_DISPLAY', 'true', '--define-bool', 'WP_DISABLE_FATAL_ERROR_HANDLER', 'true',
                         '--mount=' + str(reports) + ':/reports', '--mount=' + str(updates) + ':/update-fixtures',
                         '--blueprint=' + str(path), '--blueprint-may-read-adjacent-files'], check=True, timeout=300)
+        if args.editor_chrome:
+            subprocess.run([sys.executable, str(tests / 'validate-file-editor.py'),
+                            str(Path.home() / '.wordpress-playground' / f'{wp}.zip'),
+                            str(reports / 'pdf-editor-cases.json'), '--chrome', args.editor_chrome], check=True)
         def report(name):
             return json.loads((reports / (name + '.json')).read_text())
         install, status, admin, updater, rest = map(report, ['installation', 'status', 'maintenance', 'github-updates', 'rest-tools'])

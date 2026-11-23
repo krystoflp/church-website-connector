@@ -63,7 +63,7 @@ jobs:
       - name: Install WordPress Playground
         run: npm install --prefix "$RUNNER_TEMP/playground" --no-audit --no-fund @wp-playground/cli@3.1.65
       - name: Test installation, settings, permissions and native upgrade on latest stable WordPress
-        run: python3 scripts/test_wordpress.py --cli "$RUNNER_TEMP/playground/node_modules/.bin/wp-playground-cli"
+        run: python3 scripts/test_wordpress.py --cli "$RUNNER_TEMP/playground/node_modules/.bin/wp-playground-cli" --editor-chrome google-chrome
       - name: Record the tested release files
         id: tested
         run: echo "package_hash=$(sha256sum dist/*.zip dist/*.json | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"

@@ -1,7 +1,7 @@
 === Church Website Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.13.7
+Stable tag: 1.13.8
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -565,6 +565,11 @@ adds filtered rule search, exact-path log counts, group management, selected
 batches, reviewed matching defaults and portable plain-rule import/export.
 
 == Changelog ==
+
+= 1.13.8 =
+
+* Use the saved post when reviewing a draft date. Preserve concurrent edits through the final save and explain changes that require another approval.
+* Preserve native File block labels, inline previews and download controls when replacing a PDF. Verify the exact replacement against its approval.
 
 = 1.13.7 =
 
