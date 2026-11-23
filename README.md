@@ -336,7 +336,11 @@ to read the post, numbered File blocks and current state hash. Review
 `preview-pdf-replacement` with the same-site Media Library attachment ID and
 plain-text label. This updates the embedded and visible file links and preserves
 the inline preview configuration. Review `preview-draft-date` with a site-local
-date or time. Apply either approved edit using `apply-post-edit`.
+date or time. Apply either approved edit using `apply-post-edit`. Opening the
+signed-in preview keeps a date approval valid when the saved draft is unchanged.
+WordPress adds the translated embed description to the saved file label when it
+renders the page. Replacement handles recognised older File blocks and directs
+you to the editor for markup it cannot verify.
 
 To publish a draft with a saved current or past date, use
 `preview-draft-publish` and review the post, date and PDFs. For publication

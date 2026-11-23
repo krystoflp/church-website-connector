@@ -25,11 +25,10 @@ function permission( $input = null ): true|\WP_Error {
 
 /** Read the native edit view and guard the complete relevant stored post state. */
 function snapshot( int $id, string $kind = 'post', bool $editorial = false ): array|\WP_Error {
-	$item = RestTools\read_item( $kind, $id, true );
+	$item = RestTools\read_item( $kind, $id, true, $post );
 	if ( is_wp_error( $item ) ) {
 		return $item;
 	}
-	$post = get_post( $id );
 	if ( ! $post instanceof \WP_Post || ! in_array( $post->post_status, $editorial ? array( 'draft', 'publish', 'future' ) : array( 'draft', 'publish' ), true ) ) {
 		return RestTools\error( 'post_status', 'Choose an editable ordinary post or page with a supported status.', 409 );
 	}
@@ -38,7 +37,8 @@ function snapshot( int $id, string $kind = 'post', bool $editorial = false ): ar
 		return $files;
 	}
 
-	$review = array(
+	$timezone = wp_timezone_string();
+	$review   = array(
 		'id'         => $id,
 		'kind'       => $kind,
 		'title'      => $post->post_title,
@@ -46,9 +46,9 @@ function snapshot( int $id, string $kind = 'post', bool $editorial = false ): ar
 		'status'     => $post->post_status,
 		'date_local' => '0000-00-00 00:00:00' === $post->post_date_gmt ? null : str_replace( ' ', 'T', $post->post_date ),
 		'date_gmt'   => '0000-00-00 00:00:00' === $post->post_date_gmt ? null : str_replace( ' ', 'T', $post->post_date_gmt ) . 'Z',
-		'timezone'   => wp_timezone_string(),
+		'timezone'   => $timezone,
 		'categories' => $item['fields']['categories'] ?? array(),
-		'state_hash' => hash( 'sha256', $item['state_hash'] . $post->post_date . wp_timezone_string() ),
+		'state_hash' => hash( 'sha256', $item['state_hash'] . $post->post_date . $timezone ),
 	) + PostFiles\describe_content( $files );
 	if ( isset( $review['synced_patterns'] ) || isset( $review['pattern_review_issue'] ) ) {
 		$review['state_hash'] = hash( 'sha256', $review['state_hash'] . wp_json_encode( $review['synced_patterns'] ?? $review['pattern_review_issue'] ) );
@@ -59,8 +59,9 @@ function snapshot( int $id, string $kind = 'post', bool $editorial = false ): ar
 		$review['state_hash']           = hash( 'sha256', $review['state_hash'] . wp_json_encode( $event ) );
 	}
 	return array(
-		'post'   => $post,
-		'review' => $review,
+		'post'           => $post,
+		'review'         => $review,
+		'related_fields' => array_intersect_key( $item['fields'], array_flip( array( 'categories', 'tags', 'featured_media' ) ) ),
 	) + $files;
 }
 
@@ -387,6 +388,12 @@ function prepare_review( string $operation, array $state, array $parameters, ?ar
 	$body        = $state['post']->post_content;
 	$body_guard  = array();
 	$comparison  = null;
+	if ( 'set_draft_date' === $operation ) {
+		$body_guard['date_review_fields'] = date_review_fields( $state );
+	} elseif ( 'replace_pdf' === $operation ) {
+		// The displayed link and dimensions alone cannot distinguish different saved File markup.
+		$body_guard['replacement_content_hash'] = hash( 'sha256', $plan['body']['content'] );
+	}
 	if ( $publication ) {
 		$body_guard['publication_wording_reviewed'] = true;
 
@@ -490,13 +497,36 @@ function offer_pdf_correction( \WP_Error $error, array $state, ?array $replaces 
 	return RestTools\review_error( $error->get_error_code(), $error->get_error_message(), $private['message'] . $message, $data );
 }
 
-function refresh_review( string $operation, array $state, array $saved ): \WP_Error {
+/** Keep fingerprints of reviewable fields so stale-date errors can name changes without retaining draft text. */
+function date_review_fields( array $state ): array {
+	$post   = $state['post'];
+	$review = $state['review'];
+	$fields = array(
+		'publication date' => array( $post->post_date, $post->post_date_gmt ),
+		'status'           => $post->post_status,
+		'site timezone'    => $review['timezone'],
+		'title'            => $post->post_title,
+		'excerpt'          => $post->post_excerpt,
+		'post content'     => $post->post_content,
+		'categories'       => $review['categories'],
+		'File blocks'      => $review['file_blocks'],
+	);
+	return array_map( static fn( $value ) => hash( 'sha256', wp_json_encode( $value ) ), $fields );
+}
+
+function refresh_review( string $operation, array $state, array $saved, string $explanation = '' ): \WP_Error {
 	$error = RestTools\error( 'stale', 'The post or its reviewed files changed after preview.', 409 );
 	if ( 'replace_pdf' === $operation && ( empty( $saved['block_hash'] ) || file_block_hash( $state, $saved['changes']['file_block'] ) !== $saved['block_hash'] ) ) {
 		RestTools\consume_preview( $saved );
 		return new \WP_Error( $error->get_error_code(), 'The selected File block changed or moved. Identify the intended block again before preparing a replacement.', array( 'status' => 409 ) );
 	}
-	return RestTools\refreshed_error( $error, prepare_review( $operation, $state, $saved['changes'], $saved ), $saved );
+	if ( 'set_draft_date' === $operation ) {
+		$fields      = date_review_fields( $state );
+		$previous    = array_intersect_key( $saved['date_review_fields'] ?? array(), $fields );
+		$changed     = array_keys( array_diff_assoc( $previous, $fields ) );
+		$explanation = $changed ? 'The following changed since approval: ' . implode( ', ', $changed ) . '. The requested date was not saved.' : 'The saved state differs from the earlier date review. The requested date was not saved.';
+	}
+	return RestTools\refreshed_error( $error, prepare_review( $operation, $state, $saved['changes'], $saved ), $saved, explanation: $explanation );
 }
 
 function apply_edit( $input ): array|\WP_Error {
@@ -532,13 +562,30 @@ function apply( $input, string $approval, array $operations ): array|\WP_Error {
 	}
 
 	try {
-		wp_cache_delete( $id, 'posts' );
+		// Capture related rows before checking the approval, so an edit after that check cannot become the baseline.
+		$date_fields  = array();
+		$date_related = 'set_draft_date' === $operation ? RestTools\related_write_condition( $id, $kind, $date_fields ) : null;
+		if ( '' === $date_related ) {
+			return RestTools\error( 'update_unverified', 'The draft’s related fields could not be verified before setting its date.', 503 );
+		}
 		$state = snapshot( $id, $kind, $editorial );
 		if ( is_wp_error( $state ) ) {
 			return $state;
 		}
 		if ( ! hash_equals( $saved['state_hash'], $state['review']['state_hash'] ) ) {
 			return refresh_review( $operation, $state, $saved );
+		}
+		if ( null !== $date_related ) {
+			foreach ( $state['related_fields'] as $field => $reviewed ) {
+				$stored = $date_fields[ $field ];
+				if ( is_array( $reviewed ) && is_array( $stored ) ) {
+					sort( $reviewed, SORT_NUMERIC );
+					sort( $stored, SORT_NUMERIC );
+				}
+				if ( $reviewed !== $stored ) {
+					return RestTools\error( 'post_guard', 'WordPress’s review of the draft’s categories, tags or featured image differs from the saved values. Check the draft before setting its date.', 409 );
+				}
+			}
 		}
 		// Pre-upgrade publication previews did not ask the user to review the wording.
 		if ( in_array( $operation, array( 'publish', 'publish_page', 'schedule' ), true ) && empty( $saved['publication_wording_reviewed'] ) ) {
@@ -548,6 +595,9 @@ function apply( $input, string $approval, array $operations ): array|\WP_Error {
 		if ( is_wp_error( $plan ) ) {
 			return 'church_connector_rest_pdf_target' === $plan->get_error_code() ? offer_pdf_correction( $plan, $state, $saved ) : $plan;
 		}
+		if ( 'replace_pdf' === $operation && ! hash_equals( $saved['replacement_content_hash'] ?? '', hash( 'sha256', $plan['body']['content'] ) ) ) {
+			return refresh_review( $operation, $state, $saved, 'The earlier approval does not cover the exact replacement markup. The PDF block was not changed.' );
+		}
 		if ( ! hash_equals( $saved['review'], hash( 'sha256', wp_json_encode( $plan['review'] ) ) ) ) {
 			return refresh_review( $operation, $state, $saved );
 		}
@@ -555,7 +605,7 @@ function apply( $input, string $approval, array $operations ): array|\WP_Error {
 			return RestTools\error( 'token', 'The preview was replaced, discarded or used.', 409 );
 		}
 
-		$review = commit( $state['post'], $plan, $editorial );
+		$review = commit( $state['post'], $plan, $editorial, $date_related );
 		RestTools\audit( $saved, is_wp_error( $review ) ? 'error' : 'verified' );
 		return $review;
 	} finally {
@@ -583,14 +633,18 @@ function file_dependencies_match( array $plan, string $content ): bool {
 }
 
 /** Keep native REST validation, permission callbacks, content filtering and save hooks. */
-function commit( \WP_Post $post, array $plan, bool $editorial ): array|\WP_Error {
+function commit( \WP_Post $post, array $plan, bool $editorial, ?string $date_related ): array|\WP_Error {
 	$id        = $post->ID;
 	$protected = array_intersect_key(
 		get_object_vars( $post ),
 		array_flip( array( 'post_content', 'post_status', 'post_date', 'post_date_gmt', 'post_title', 'post_excerpt', 'post_type', 'post_author', 'post_password', 'post_parent' ) )
 	);
-	$expected  = $plan['expected'] + $protected;
-	$request   = new \WP_REST_Request( 'POST', RestTools\route( $post->post_type, $id ) );
+	if ( null !== $date_related ) {
+		// Keep the native types for strict read-back, including integer post_parent and menu_order.
+		$protected = array_intersect_key( get_object_vars( $post ), RestTools\metadata_columns( $post ) );
+	}
+	$expected = $plan['expected'] + $protected;
+	$request  = new \WP_REST_Request( 'POST', RestTools\route( $post->post_type, $id ) );
 	$request->set_body_params( $plan['body'] );
 
 	// Preserve the reviewed date through native saves, including undated drafts.
@@ -604,8 +658,8 @@ function commit( \WP_Post $post, array $plan, bool $editorial ): array|\WP_Error
 	};
 	// WordPress can reserialise block delimiters. Keep the reviewed bytes only
 	// when the native result has exactly the same parsed blocks and inner HTML.
-	$preserve_blocks = static function ( $data, $post_array ) use ( $id, $expected, &$native_save ) {
-		if ( $native_save && (int) ( $post_array['ID'] ?? 0 ) === $id ) {
+	$preserve_blocks = static function ( $data, $post_array ) use ( $id, $expected, $date_related, $request, &$native_save ) {
+		if ( $native_save && (int) ( $post_array['ID'] ?? 0 ) === $id && ( null === $date_related || RestTools\is_rest_metadata_write( $request ) ) ) {
 			$content = wp_unslash( $data['post_content'] );
 			if ( $content !== $expected['post_content'] && parse_blocks( $content ) === parse_blocks( $expected['post_content'] ) ) {
 				$data['post_content'] = wp_slash( $expected['post_content'] );
@@ -614,10 +668,13 @@ function commit( \WP_Post $post, array $plan, bool $editorial ): array|\WP_Error
 		return $data;
 	};
 
-	$conflict = false;
-	$blocked  = false;
-	$veto     = static function ( $sql ) use ( $id, $expected, $plan, &$blocked, &$conflict ) {
-		if ( ! str_starts_with( ltrim( $sql ), 'UPDATE ' ) || ! RestTools\is_post_update_query( $id ) ) {
+	// Core's original date UPDATE must reach ordinary database filters just once, with its predicates attached.
+	$veto_priority = null === $date_related ? PHP_INT_MAX : PHP_INT_MIN;
+	$conflict      = false;
+	$blocked       = false;
+	$date_written  = false;
+	$veto          = static function ( $sql ) use ( $id, $post, $expected, $plan, $date_related, $request, &$date_written, &$blocked, &$conflict ) {
+		if ( ! str_starts_with( ltrim( $sql ), 'UPDATE ' ) || ! RestTools\is_post_update_query( $id ) || ( null !== $date_related && ! RestTools\is_rest_metadata_write( $request ) ) ) {
 			return $sql;
 		}
 		if ( $conflict || ! file_dependencies_match( $plan, $expected['post_content'] ) || ( isset( $plan['preserve_event'] ) && wp_next_scheduled( 'publish_future_post', array( $id ) ) !== $plan['preserve_event'] ) ) {
@@ -625,14 +682,27 @@ function commit( \WP_Post $post, array $plan, bool $editorial ): array|\WP_Error
 			$blocked  = true;
 			return '';
 		}
+		if ( null !== $date_related ) {
+			// The date plan always changes the row. Zero affected rows means something changed after review.
+			$columns = RestTools\metadata_columns( $post ) + array_intersect_key(
+				get_object_vars( $post ),
+				array_flip( array( 'post_modified', 'post_modified_gmt', 'to_ping', 'pinged', 'guid', 'comment_count' ) )
+			);
+			if ( wp_timezone_string() !== $plan['review']['timezone'] || 1 !== RestTools\conditional_post_update( $sql, $columns, $date_related ) ) {
+				$conflict = true;
+				$blocked  = true;
+				return '';
+			}
+			$date_written = true;
+			return 'SELECT 1';
+		}
 		return $sql;
 	};
-	$verify   = static function ( $post_id, $data ) use ( $id, $post, $expected, $plan, $veto, &$conflict ) {
-		if ( $id !== $post_id ) {
+	$verify        = static function ( $post_id, $data ) use ( $id, $post, $expected, $plan, $veto, $veto_priority, $date_related, $request, &$conflict ) {
+		if ( $id !== $post_id || ( null !== $date_related && ! RestTools\is_rest_metadata_write( $request ) ) ) {
 			return;
 		}
-		wp_cache_delete( $id, 'posts' );
-		$stored   = get_post( $id );
+		$stored   = RestTools\stored_post( $id );
 		$conflict = ! $stored || get_object_vars( $stored ) !== get_object_vars( $post )
 			|| wp_get_post_categories( $id ) !== $plan['review']['categories']
 			|| ( isset( $plan['minimum_schedule_timestamp'] ) && $plan['minimum_schedule_timestamp'] < time() + MINUTE_IN_SECONDS );
@@ -642,7 +712,7 @@ function commit( \WP_Post $post, array $plan, bool $editorial ): array|\WP_Error
 				break;
 			}
 		}
-		add_filter( 'query', $veto, PHP_INT_MAX );
+		add_filter( 'query', $veto, $veto_priority );
 	};
 
 	$prepare_hook = 'rest_pre_insert_' . $post->post_type;
@@ -657,7 +727,7 @@ function commit( \WP_Post $post, array $plan, bool $editorial ): array|\WP_Error
 		remove_filter( $prepare_hook, $prepare, PHP_INT_MAX );
 		remove_filter( 'wp_insert_post_data', $preserve_blocks, PHP_INT_MAX );
 		remove_action( 'pre_post_update', $verify, PHP_INT_MAX );
-		remove_filter( 'query', $veto, PHP_INT_MAX );
+		remove_filter( 'query', $veto, $veto_priority );
 	}
 	if ( $conflict ) {
 		return $blocked
@@ -667,7 +737,9 @@ function commit( \WP_Post $post, array $plan, bool $editorial ): array|\WP_Error
 	if ( is_wp_error( $response ) || $response->get_status() >= 400 ) {
 		return RestTools\error( 'post_save', 'WordPress refused or could not complete the save. Read the post before retrying.', is_wp_error( $response ) ? 500 : $response->get_status() );
 	}
-	wp_cache_delete( $id, 'posts' );
+	if ( null !== $date_related && ! $date_written ) {
+		return RestTools\error( 'post_read_back', 'The native conditional date save could not be verified. Inspect the draft before retrying.', 409 );
+	}
 	$after = snapshot( $id, $post->post_type, $editorial );
 	if ( is_wp_error( $after ) ) {
 		return $after;

@@ -319,40 +319,133 @@ function attachment( int $id ): array|\WP_Error {
 	);
 }
 
-/** Change only core File markup and its attachment attributes. */
+/** Read the next significant token, including closing tags and unexpected content. */
+function file_token( \WP_HTML_Tag_Processor $html ): ?string {
+	while ( $html->next_token() ) {
+		if ( '#text' === $html->get_token_name() && '' === trim( $html->get_modifiable_text(), " \t\r\n\f" ) ) {
+			continue;
+		}
+		return $html->is_tag_closer() ? '/' . $html->get_tag() : $html->get_token_name();
+	}
+	return null;
+}
+
+/** Only change recognised File markup. Extra attributes can affect editor validation or behaviour. */
+function file_attributes( \WP_HTML_Tag_Processor $html, array $allowed ): bool {
+	return ! array_diff( $html->get_attribute_names_with_prefix( '' ) ?? array(), $allowed );
+}
+
+/** Compare class sets independent of their order, as the editor does. */
+function file_classes( \WP_HTML_Tag_Processor $html, string $expected ): bool {
+	$actual = iterator_to_array( $html->class_list(), false );
+	$wanted = preg_split( '/\s+/', trim( $expected ), -1, PREG_SPLIT_NO_EMPTY );
+	sort( $actual );
+	sort( $wanted );
+	return $actual === $wanted;
+}
+
+/** Change only the selected plain core File block, retaining link IDs and presentation. */
 function replace( string $content, array $file, array $pdf, string $label ): string|\WP_Error {
-	$html      = new \WP_HTML_Tag_Processor( $file['html'] );
-	$links     = 0;
-	$downloads = 0;
-	$embeds    = 0;
-	$plain     = true;
-	while ( $html->next_tag() ) {
-		if ( 'OBJECT' === $html->get_tag() && 'application/pdf' === $html->get_attribute( 'type' ) ) {
-			++$embeds;
-			$html->set_attribute( 'data', $pdf['url'] );
-			$html->set_attribute(
-				'aria-label',
-				/* translators: %s: PDF link label. */
-				sprintf( __( 'Embed of %s', 'church-website-connector' ), $label )
-			);
-		} elseif ( 'A' === $html->get_tag() ) {
-			$html->set_attribute( 'href', $pdf['url'] );
-			if ( null !== $html->get_attribute( 'download' ) ) {
-				++$downloads;
-			} else {
-				++$links;
-				$plain = $html->next_token() && '#text' === $html->get_token_name()
-					&& $html->set_modifiable_text( $label ) && $html->next_token()
-					&& 'A' === $html->get_tag() && $html->is_tag_closer();
-			}
-		} elseif ( in_array( $html->get_tag(), array( 'OBJECT', 'EMBED', 'IFRAME' ), true ) ) {
-			return RestTools\error( 'pdf_block', 'Choose a standard WordPress File block with a plain file label.' );
+	$unsupported = RestTools\error( 'pdf_block', 'Review this File block in the WordPress editor. Its markup or settings cannot be preserved by the PDF replacement tool.', 409 );
+	$attrs       = $file['attrs'];
+	$html        = new \WP_HTML_Tag_Processor( $file['html'] );
+	// Complex block supports and bindings require the editor's own serializer.
+	if ( ! is_array( $attrs ) || array_diff( array_keys( $attrs ), array( 'id', 'href', 'textLinkHref', 'displayPreview', 'previewHeight', 'showDownloadButton', 'align', 'anchor', 'className', 'metadata' ) )
+		|| ! is_array( $attrs['metadata'] ?? array() ) || ! empty( $attrs['metadata']['bindings'] )
+		|| ! is_bool( $attrs['displayPreview'] ?? false ) || ! is_int( $attrs['previewHeight'] ?? 600 )
+		|| ! is_string( $attrs['className'] ?? '' ) || ! is_string( $attrs['align'] ?? '' ) || ! is_string( $attrs['anchor'] ?? '' )
+		|| 'DIV' !== file_token( $html ) || ! file_attributes( $html, array( 'class', 'id' ) )
+		|| $html->get_attribute( 'id' ) !== ( $attrs['anchor'] ?? null ) ) {
+		return $unsupported;
+	}
+	$classes = 'wp-block-file ' . ( $attrs['className'] ?? '' );
+	if ( ! empty( $attrs['align'] ) ) {
+		$classes .= ' align' . $attrs['align'];
+	}
+	if ( ! file_classes( $html, $classes ) ) {
+		return $unsupported;
+	}
+
+	$embed_label = null;
+	if ( ! empty( $attrs['displayPreview'] ) ) {
+		$height = $attrs['previewHeight'] ?? 600;
+		if ( 'OBJECT' !== file_token( $html ) || ! file_classes( $html, 'wp-block-file__embed' )
+			|| 'application/pdf' !== $html->get_attribute( 'type' )
+			|| ! file_attributes( $html, array( 'class', 'data', 'type', 'style', 'aria-label' ) )
+			|| ! preg_match( '/\A\s*width\s*:\s*100%\s*;\s*height\s*:\s*' . (int) $height . 'px\s*;?\s*\z/i', (string) $html->get_attribute( 'style' ) ) ) {
+			return $unsupported;
+		}
+		$embed_label = $html->get_attribute( 'aria-label' );
+		if ( ! is_string( $embed_label ) ) {
+			return $unsupported;
+		}
+		// Gutenberg saves the filename. WordPress localises the accessible name at render time.
+		$html->set_attribute( 'aria-label', $label );
+		$html->set_attribute( 'data', $pdf['url'] );
+		if ( '/OBJECT' !== file_token( $html ) ) {
+			return $unsupported;
 		}
 	}
-	$attrs = $file['attrs'];
-	if ( ! is_array( $attrs ) || 1 !== $links || $downloads > 1 || $embeds > 1 || ! $plain
-		|| str_contains( $file['html'], '<!-- wp:' ) || ( ! empty( $attrs['displayPreview'] ) && 1 !== $embeds ) ) {
-		return RestTools\error( 'pdf_block', 'Choose a standard WordPress File block with a plain file label.' );
+
+	if ( 'A' !== file_token( $html ) || ! file_attributes( $html, array( 'href', 'id', 'target', 'rel' ) ) ) {
+		return $unsupported;
+	}
+	$id     = $html->get_attribute( 'id' );
+	$target = $html->get_attribute( 'target' );
+	$rel    = $html->get_attribute( 'rel' );
+	if ( ( null !== $id && ! is_string( $id ) ) || ( null !== $target && ( ! is_string( $target ) || '' === $target ) )
+		|| ( null !== $rel && ( null === $target || 'noreferrer noopener' !== $rel ) ) ) {
+		return $unsupported;
+	}
+	if ( null !== $target ) {
+		$html->set_attribute( 'rel', 'noreferrer noopener' );
+	}
+	$html->set_attribute( 'href', $pdf['url'] );
+	if ( '#text' !== file_token( $html ) ) {
+		return $unsupported;
+	}
+	$old_label = $html->get_modifiable_text();
+	if ( null !== $embed_label && $embed_label !== $old_label ) {
+		// Accept the two historical saved labels, preserving a separately authored description.
+		/* translators: %s: filename. This string belongs to the WordPress File block. */
+		$legacy = sprintf( __( 'Embed of %s.' ), $old_label ); // phpcs:ignore WordPress.WP.I18n.MissingArgDomain -- Match the native core translation.
+		/* translators: %s: PDF link label. Existing connector versions saved this description. */
+		$previous = sprintf( __( 'Embed of %s', 'church-website-connector' ), $old_label );
+		if ( $embed_label !== $legacy && $embed_label !== $previous ) {
+			return $unsupported;
+		}
+	}
+	if ( ! $html->set_modifiable_text( $label ) || '/A' !== file_token( $html ) ) {
+		return $unsupported;
+	}
+
+	$next   = file_token( $html );
+	$button = 'A' === $next;
+	if ( array_key_exists( 'showDownloadButton', $attrs ) && $attrs['showDownloadButton'] !== $button ) {
+		return $unsupported;
+	}
+	if ( $button ) {
+		if ( ! in_array( $html->get_attribute( 'download' ), array( true, '' ), true ) || ! file_attributes( $html, array( 'class', 'href', 'download', 'aria-describedby' ) )
+			|| $html->get_attribute( 'aria-describedby' ) !== $id ) {
+			return $unsupported;
+		}
+		// Older native File blocks used only the first class. Migrate that button with the embed.
+		if ( file_classes( $html, 'wp-block-file__button' ) ) {
+			$html->add_class( 'wp-element-button' );
+		} elseif ( ! file_classes( $html, 'wp-block-file__button wp-element-button' ) ) {
+			return $unsupported;
+		}
+		$html->set_attribute( 'href', $pdf['url'] );
+		if ( '#text' !== file_token( $html ) || '/A' !== file_token( $html ) ) {
+			return $unsupported;
+		}
+		$next = file_token( $html );
+	} else {
+		// Older link-only blocks may omit the flag. Its current editor default is true.
+		$attrs['showDownloadButton'] = false;
+	}
+	if ( '/DIV' !== $next || null !== file_token( $html ) || $html->paused_at_incomplete_token() ) {
+		return $unsupported;
 	}
 	$attrs['id']   = $pdf['attachment_id'];
 	$attrs['href'] = $pdf['url'];

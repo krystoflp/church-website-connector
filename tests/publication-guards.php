@@ -263,7 +263,24 @@ wp_update_post( wp_slash( array( 'ID' => $notice_id, 'post_content' => guard_blo
 guard_assert( guard_error( guard_apply( $reviewed, 'apply-draft-publish', 'confirm_publish' ), 'stale' ) && get_post_status( $notice_id ) === 'draft', 'Changing the visitor link after approval invalidates the publication token' );
 $state  = guard_ok( guard_call( 'get-post-workflow', array( 'id' => $notice_id ) ) )['post'];
 $repair = guard_call( 'preview-pdf-replacement', array( 'id' => $notice_id, 'state_hash' => $state['state_hash'], 'file_block' => 1, 'attachment_id' => $current['id'], 'label' => 'Corrected weekly notice' ) );
+$before_repair = get_post( $notice_id )->post_content;
+foreach ( array( 'missing', 'different' ) as $digest_case ) {
+	$record = get_option( $slot );
+	if ( 'missing' === $digest_case ) {
+		unset( $record['replacement_content_hash'] ); // An approval staged on 1.13.7.
+	} else {
+		$record['replacement_content_hash'] = hash( 'sha256', 'Different saved markup with the same review summary' );
+	}
+	update_option( $slot, $record, false );
+	$refused = guard_apply( $repair, 'apply-post-edit' );
+	guard_assert( guard_error( $refused, 'stale' ) && get_post( $notice_id )->post_content === $before_repair, 'A ' . $digest_case . ' PDF output digest cannot authorise an edit' );
+	$refreshed = \ChurchWebsiteConnector\RestTools\review_response( $refused );
+	guard_assert( str_contains( $refreshed['message'], 'exact replacement markup' ) && is_wp_error( guard_apply( $repair, 'apply-post-edit' ) ), 'The refreshed PDF approval explains the markup check and supersedes the old token' );
+	$repair = $refreshed['data']['refreshed_preview'];
+}
+$expected_digest = get_option( $slot )['replacement_content_hash'];
 guard_ok( guard_apply( $repair, 'apply-post-edit' ) );
+guard_assert( hash( 'sha256', get_post( $notice_id )->post_content ) === $expected_digest, 'Saved replacement bytes match the exact approved output' );
 guard_ok( guard_apply( guard_publish_preview( $notice_id ), 'apply-draft-publish', 'confirm_publish' ) );
 guard_assert( get_post_status( $notice_id ) === 'publish' && ! str_contains( get_post( $notice_id )->post_content, $old['href'] ), 'Replacing the mismatched PDF restores the normal notice publication workflow' );
 $manual_id = guard_draft( 'post', guard_block( array(), '<a href="https://external.example/notice.pdf">Other document</a>' ) );
@@ -298,6 +315,10 @@ wp_update_post( array( 'ID' => $wording_id, 'post_excerpt' => 'For the first ser
 $draft_state = guard_ok( guard_call( 'get-post-workflow', array( 'id' => $wording_id ) ) )['post'];
 $date_review = guard_ok( guard_call( 'preview-draft-date', array( 'id' => $wording_id, 'state_hash' => $draft_state['state_hash'], 'date_local' => wp_date( 'Y-m-d', time() - 3 * DAY_IN_SECONDS ) ) ) );
 guard_assert( ! isset( $date_review['post']['wording_review'] ), 'Separately saving a draft date does not ask for publication wording approval' );
+wp_set_post_categories( $wording_id, array( $term ) );
+$refused_date = guard_apply( $date_review, 'apply-post-edit' );
+$date_message = \ChurchWebsiteConnector\RestTools\review_response( $refused_date );
+guard_assert( guard_error( $refused_date, 'stale' ) && str_contains( $date_message['message'], 'categories' ) && ! str_contains( $date_message['message'], 'post content' ) && isset( $date_message['data']['refreshed_preview'] ), 'Date reapproval identifies the actual intervening field without exposing draft content' );
 $first = guard_ok( guard_publish_preview( $wording_id ) );
 wp_update_post( array( 'ID' => $wording_id, 'post_excerpt' => 'For both services.' ) );
 $stale  = guard_apply( $first, 'apply-draft-publish', 'confirm_publish' );
@@ -461,5 +482,81 @@ $refused = guard_apply( $preview, 'apply-revision-restore', 'confirm_restore' );
 remove_filter( 'pre_clear_scheduled_hook', $remove_event, 10 );
 guard_assert( guard_error( $refused, 'post_guard' ) && ! wp_next_scheduled( 'publish_future_post', array( $event_post ) ) && get_post( $event_post )->post_title === 'Newer event title', 'Revision restore leaves an independently removed publication event alone during the final save' );
 
+// An editor's draft view may supply a transient local date without saving a publication date.
+function guard_date_preview( $id, $date ) {
+	$state = guard_ok( guard_call( 'get-post-workflow', array( 'id' => $id ) ) )['post'];
+	return guard_ok( guard_call( 'preview-draft-date', array( 'id' => $id, 'state_hash' => $state['state_hash'], 'date_local' => $date ) ) );
+}
+$draft = wp_insert_post( array( 'post_title' => 'Draft date review', 'post_status' => 'draft' ) );
+global $wpdb;
+$wpdb->update( $wpdb->posts, array( 'post_date' => '2026-01-02 09:00:00' ), array( 'ID' => $draft ) );
+clean_post_cache( $draft );
+$saved = guard_ok( guard_call( 'get-post-workflow', array( 'id' => $draft ) ) )['post'];
+$view  = new WP_Query( array( 'p' => $draft ) );
+guard_assert( $view->is_preview() && $view->post->post_date !== '2026-01-02 09:00:00' && null === $saved['date_local'], 'The signed-in draft preview assigns a temporary date while the saved draft is undated' );
+wp_cache_set( $draft, clone $view->post, 'posts' );
+$read = guard_ok( guard_call( 'get-post-workflow', array( 'id' => $draft ) ) )['post'];
+guard_assert( $read === $saved, 'A cached signed-in preview object gives the same workflow review as the saved draft' );
+// Repopulate the preview object even after the native edit-context read, before either hash is calculated.
+$recache = static function ( $response, $handler, $request ) use ( $draft, $view ) {
+	if ( 'GET' === $request->get_method() && '/wp/v2/posts/' . $draft === $request->get_route() ) {
+		wp_cache_set( $draft, clone $view->post, 'posts' );
+	}
+	return $response;
+};
+add_filter( 'rest_request_after_callbacks', $recache, 10, 3 );
+try {
+	$preview = guard_ok( guard_call( 'preview-draft-date', array( 'id' => $draft, 'state_hash' => $saved['state_hash'], 'date_local' => '2026-02-01T11:30:00' ) ) );
+	$dated   = guard_ok( guard_apply( $preview, 'apply-post-edit', 'approved' ) );
+} finally {
+	remove_filter( 'rest_request_after_callbacks', $recache, 10 );
+}
+guard_assert( 'draft' === $dated['post']['status'] && '2026-02-01T11:30:00Z' === $dated['post']['date_gmt'] && is_wp_error( guard_apply( $preview, 'apply-post-edit', 'approved' ) ), 'One approval sets the exact draft date despite the cached preview and remains single use' );
+$wpdb->update( $wpdb->posts, array( 'post_date_gmt' => '0000-00-00 00:00:00' ), array( 'ID' => $draft ) );
+clean_post_cache( $draft );
+$preview = guard_date_preview( $draft, '2026-06-05' );
+$wpdb->update( $wpdb->posts, array( 'post_date' => '2026-05-04 12:00:00' ), array( 'ID' => $draft ) );
+$result = guard_apply( $preview, 'apply-post-edit', 'approved' );
+guard_assert( guard_error( $result, 'stale' ) && '2026-05-04 12:00:00' === get_post( $draft )->post_date && '0000-00-00 00:00:00' === get_post( $draft )->post_date_gmt, 'A genuine local-only edit with zero GMT and unchanged modified time still invalidates the approval' );
+
+// A native editor can save independently after pre_post_update, even within a callback on this request.
+$other_category = wp_insert_term( 'Late date review category', 'category' )['term_id'];
+foreach ( array( 'wording', 'category' ) as $change ) {
+	$old_date = get_post( $draft )->post_date;
+	$preview  = guard_date_preview( $draft, '2026-06-05' );
+	$edited   = false;
+	$race     = static function ( $sql ) use ( $draft, $change, $other_category, $wpdb, &$edited, &$race ) {
+		if ( ! $edited && str_starts_with( $sql, "UPDATE `{$wpdb->posts}` SET" ) && str_contains( $sql, '2026-06-05' ) ) {
+			$edited = true;
+			remove_filter( 'query', $race, 100 );
+			if ( 'wording' === $change ) {
+				wp_update_post( array( 'ID' => $draft, 'post_content' => 'Independent editor wording', 'edit_date' => true ) );
+			} else {
+				wp_set_post_categories( $draft, array( $other_category ) );
+			}
+		}
+		return $sql;
+	};
+	add_filter( 'query', $race, 100 );
+	try {
+		$result = guard_apply( $preview, 'apply-post-edit', 'approved' );
+	} finally {
+		remove_filter( 'query', $race, 100 );
+	}
+	clean_post_cache( $draft );
+	$row = get_post( $draft );
+	guard_assert( $edited && guard_error( $result, 'post_guard' ) && $old_date === $row->post_date && '0000-00-00 00:00:00' === $row->post_date_gmt, "A last-moment $change edit stops the conditional date write" );
+	guard_assert( 'wording' === $change ? 'Independent editor wording' === $row->post_content : array( $other_category ) === wp_get_post_categories( $draft ), "A last-moment $change edit survives the refused date change" );
+}
+$before  = guard_ok( guard_call( 'get-post-workflow', array( 'id' => $draft ) ) )['post'];
+$preview = guard_date_preview( $draft, '2026-06-05' );
+$new_category = wp_insert_term( 'Actual reassignment', 'category' )['term_id'];
+wp_set_post_categories( $draft, array( $new_category ) );
+wp_cache_set( $draft, $before['categories'], 'category_relationships' );
+$cached = guard_ok( guard_call( 'get-post-workflow', array( 'id' => $draft ) ) )['post'];
+guard_assert( $cached['state_hash'] === $before['state_hash'], 'A stale relationship cache can reproduce the earlier native REST hash after a real category change' );
+$refused = guard_apply( $preview, 'apply-post-edit', 'approved' );
+clean_object_term_cache( $draft, 'post' );
+guard_assert( guard_error( $refused, 'post_guard' ) && '0000-00-00 00:00:00' === get_post( $draft )->post_date_gmt && array( $new_category ) === wp_get_post_categories( $draft ), 'An apparently unchanged REST review cannot approve a date over different saved term relationships' );
 update_option( 'timezone_string', $original_zone );
 file_put_contents( '/reports/publication-guards.json', wp_json_encode( array( 'checks' => count( $checks ), 'cases' => $checks, 'wordpress' => $GLOBALS['wp_version'], 'php' => PHP_VERSION ) ) );

@@ -89,7 +89,7 @@ function rest_review_result( $result, $handler, $request ) {
 	return $review ? new \WP_REST_Response( $review, $review['data']['status'] ) : $result;
 }
 
-function refreshed_error( \WP_Error $error, $next, array $saved, string $prefix = PREVIEW_PREFIX, string $hook = EXPIRE_HOOK ): \WP_Error {
+function refreshed_error( \WP_Error $error, $next, array $saved, string $prefix = PREVIEW_PREFIX, string $hook = EXPIRE_HOOK, string $explanation = '' ): \WP_Error {
 	$data = $error->get_error_data();
 	if ( is_wp_error( $next ) ) {
 		retire_preview( $saved, $prefix, $hook );
@@ -108,6 +108,9 @@ function refreshed_error( \WP_Error $error, $next, array $saved, string $prefix 
 		$message                   = 'The earlier preview is stale. Compare the fresh preview with the earlier review and obtain approval for the new token.';
 	}
 	$fallback = 'The earlier preview is stale. Read the same item and prepare a new preview from the original request before asking for fresh approval.';
+	if ( '' !== $explanation ) {
+		$message = $explanation . ' ' . $message;
+	}
 	return review_error( $error->get_error_code(), $fallback, $message, $data );
 }
 
@@ -207,7 +210,19 @@ function raw_text( mixed $value ): string {
     return is_array( $value ) ? (string) ( $value['raw'] ?? '' ) : ( is_string( $value ) ? $value : '' );
 }
 
-function read_item( string $kind, int $id, bool $for_publication_workflow = false ) {
+/** Read the saved row in the same raw, typed representation WordPress uses in its post cache. */
+function stored_post( int $id ): ?\WP_Post {
+	global $wpdb;
+	$row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$wpdb->posts} WHERE ID = %d", $id ) );
+	return $row ? new \WP_Post( sanitize_post( $row, 'raw' ) ) : null;
+}
+
+function read_item( string $kind, int $id, bool $for_publication_workflow = false, ?\WP_Post &$workflow_post = null ) {
+	if ( $for_publication_workflow ) {
+		// Native permission and REST callbacks must also see the saved post, including its author and status.
+		wp_cache_delete( $id, 'posts' );
+		$permission_post = get_post( $id );
+	}
     // Check before dispatch too, including when callbacks are invoked directly.
     if ( ! current_user_can( 'edit_post', $id ) ) {
         return error( 'forbidden', 'Your WordPress account cannot edit this item.', 403 );
@@ -219,13 +234,20 @@ function read_item( string $kind, int $id, bool $for_publication_workflow = fals
 	}
 	$data = dispatch( 'GET', route( $kind, $id ), $query );
     if ( is_wp_error( $data ) ) { return $data; }
-    $post = get_post( $id );
+	$post          = $for_publication_workflow ? stored_post( $id ) : get_post( $id );
     $expected_type = $kind === 'media' ? 'attachment' : $kind;
     if ( ! $post || $post->post_type !== $expected_type || ( $data['id'] ?? null ) !== $id || $post->post_status === 'trash' ) {
         return error( 'target', 'The item does not match the requested kind or is in the trash.', 404 );
     }
-	if ( $for_publication_workflow && post_type_supports( $kind, 'excerpt' ) ) {
-		$data['excerpt'] = $post->post_excerpt;
+	if ( $for_publication_workflow ) {
+		if ( ! $permission_post || $permission_post->post_type !== $post->post_type || $permission_post->post_status !== $post->post_status || $permission_post->post_parent !== $post->post_parent
+			|| $permission_post->post_author !== $post->post_author || $permission_post->post_password !== $post->post_password ) {
+			return error( 'stale', 'The post’s ownership or visibility changed during the read. Read the post again.', 409 );
+		}
+		$workflow_post = $post;
+		if ( post_type_supports( $kind, 'excerpt' ) ) {
+			$data['excerpt'] = $post->post_excerpt;
+		}
 	}
     $values = [];
     foreach ( fields( $kind ) as $field ) {
@@ -740,11 +762,12 @@ function veto_post_update( string $sql, int $id ): string {
 }
 
 /** An independent save started by a WordPress callback owns its own write. */
-function is_rest_metadata_write(): bool {
+function is_rest_metadata_write( ?\WP_REST_Request $request = null ): bool {
 	$caller = false;
-	foreach ( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS ) as $frame ) {
+	foreach ( debug_backtrace( $request ? 0 : DEBUG_BACKTRACE_IGNORE_ARGS ) as $frame ) {
 		if ( $caller ) {
-			return 'update_item' === $frame['function'] && is_a( $frame['class'] ?? '', 'WP_REST_Posts_Controller', true );
+			return 'update_item' === $frame['function'] && is_a( $frame['class'] ?? '', 'WP_REST_Posts_Controller', true )
+				&& ( ! $request || ( $frame['args'][0] ?? null ) === $request );
 		}
 		$caller = 'wp_update_post' === $frame['function'];
 	}
@@ -752,7 +775,7 @@ function is_rest_metadata_write(): bool {
 }
 
 /** Match the taxonomy and media values that WordPress stores outside wp_posts. */
-function related_write_condition( int $id, string $kind ): string {
+function related_write_condition( int $id, string $kind, ?array &$date_fields = null ): string {
 	global $wpdb;
 	// The fixed native fields use these metadata keys. Include duplicates and missing rows.
 	$key   = 'media' === $kind ? '_wp_attachment_image_alt' : '_thumbnail_id';
@@ -768,7 +791,28 @@ function related_write_condition( int $id, string $kind ): string {
 	if ( 'post' !== $kind ) {
 		return $condition;
 	}
-	$terms = $wpdb->get_col( $wpdb->prepare( "SELECT term_taxonomy_id FROM {$wpdb->term_relationships} WHERE object_id = %d ORDER BY term_taxonomy_id", $id ) );
+	if ( null !== $date_fields ) {
+		// Read term IDs for comparison with the approval and term-taxonomy IDs for the conditional write together.
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT r.term_taxonomy_id, t.taxonomy, t.term_id FROM {$wpdb->term_relationships} r LEFT JOIN {$wpdb->term_taxonomy} t ON t.term_taxonomy_id = r.term_taxonomy_id WHERE r.object_id = %d ORDER BY r.term_taxonomy_id", $id ), ARRAY_A );
+		if ( ! is_array( $rows ) || $wpdb->last_error ) {
+			return '';
+		}
+		$terms       = array_column( $rows, 'term_taxonomy_id' );
+		$date_fields = array(
+			'featured_media' => (int) ( $meta[0]['meta_value'] ?? 0 ),
+			'categories'     => array(),
+			'tags'           => array(),
+		);
+		foreach ( $rows as $row ) {
+			if ( 'category' === $row['taxonomy'] ) {
+				$date_fields['categories'][] = (int) $row['term_id'];
+			} elseif ( 'post_tag' === $row['taxonomy'] ) {
+				$date_fields['tags'][] = (int) $row['term_id'];
+			}
+		}
+	} else {
+		$terms = $wpdb->get_col( $wpdb->prepare( "SELECT term_taxonomy_id FROM {$wpdb->term_relationships} WHERE object_id = %d ORDER BY term_taxonomy_id", $id ) );
+	}
 	if ( ! is_array( $terms ) || $wpdb->last_error ) {
 		return '';
 	}
@@ -778,6 +822,17 @@ function related_write_condition( int $id, string $kind ): string {
 		$condition .= $wpdb->prepare( " AND NOT EXISTS (SELECT 1 FROM {$wpdb->term_relationships} WHERE object_id = %d AND term_taxonomy_id NOT IN ($ids))", $id ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Every list member is a database ID converted to an integer.
 	}
 	return $condition;
+}
+
+/** Execute core's prepared UPDATE only if the reviewed row and relationships still match. */
+function conditional_post_update( string $sql, array $columns, string $related ): int|bool {
+	global $wpdb;
+	$conditions = array();
+	foreach ( $columns as $column => $value ) {
+		$conditions[] = $wpdb->prepare( 'HEX(CAST(%i AS CHAR)) = HEX(%s)', $column, $value );
+	}
+	// This nested query is not a wpdb::update() call, so the guard cannot recurse.
+	return $wpdb->query( $sql . ' AND ' . implode( ' AND ', $conditions ) . $related ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Core's original UPDATE and all additional predicates are prepared.
 }
 
 /** Scope the final conflict check to core's update of this item. */
@@ -817,16 +872,9 @@ function save_metadata( array $item, array $changes, array $links, \WP_Post $bas
 		if ( $conflict ) {
 			return '';
 		}
-		global $wpdb;
-		$conditions = array();
-		foreach ( metadata_columns( $baseline ) as $column => $value ) {
-			$conditions[] = $wpdb->prepare( 'HEX(CAST(%i AS CHAR)) = HEX(%s)', $column, $value );
-		}
 		// Core treats zero matching rows as success, then assigns terms and thumbnail.
-		// Execute its exact UPDATE with the reviewed-state predicate and pass a failed
-		// query back to core on conflict so subsequent REST side effects never start.
-		// This nested query is not a wpdb::update() call, so the guard cannot recurse.
-		$written = $wpdb->query( $sql . ' AND ' . implode( ' AND ', $conditions ) . $related ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The original wpdb UPDATE and all additional predicates are prepared.
+		// Pass a failed query back to core on conflict so subsequent REST side effects never start.
+		$written = conditional_post_update( $sql, metadata_columns( $baseline ), $related );
 		if ( 0 === $written && metadata_columns( $baseline ) === $expected ) {
 			// MySQL reports zero for a genuine no-op row, e.g. a terms-only edit.
 			clean_post_cache( $id );
