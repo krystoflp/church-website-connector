@@ -418,7 +418,6 @@ function admin_page(): void {
 	echo '<section aria-labelledby="cwc-status-title"><h2 id="cwc-status-title">Status</h2>';
 	Maintenance\render_summary( $status );
 	echo '<p>Connect your assistant to this website using the setup selected below. Reuse an existing connection for this website where available; a new connection needs native website sign-in and your consent.</p>';
-	echo '<p><strong>Plugin version:</strong> ' . esc_html( VERSION ) . '</p>';
 	echo '<p><strong>Site Address:</strong> ' . esc_html( $review_identity['home'] ) . '<br><strong>WordPress Address:</strong> ' . esc_html( $review_identity['wordpress'] ) . '</p>';
 	if ( isset( $_GET['saved'] ) && '1' === $_GET['saved'] ) {
 		echo '<div class="notice notice-success"><p>Website settings saved.</p></div>';
