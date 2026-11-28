@@ -1,7 +1,7 @@
 === ChurchWeb Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.14.0
+Stable tag: 1.14.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -573,6 +573,10 @@ adds filtered rule search, exact-path log counts, group management, selected
 batches, reviewed matching defaults and portable plain-rule import/export.
 
 == Changelog ==
+
+= 1.14.1 =
+
+* Save the reviewed date on a draft with empty comment or ping settings. The draft keeps its wording, featured image, category and discussion settings through dating and separately approved publication.
 
 = 1.14.0 =
 * Show ChurchWeb Connector in WordPress administration and retain the existing plugin and update identifiers.

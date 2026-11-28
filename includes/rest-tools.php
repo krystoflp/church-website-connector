@@ -838,27 +838,35 @@ function conditional_post_update( string $sql, array $columns, string $related )
 	return $wpdb->query( $sql . ' AND ' . implode( ' AND ', $conditions ) . $related ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Core's original UPDATE and all additional predicates are prepared.
 }
 
+/** Restore reviewed empty draft settings before other post-data filters see core's update defaults. */
+function draft_discussion_filter( \WP_Post $post, array $expected, ?\WP_REST_Request &$request ): ?\Closure {
+	$keep_comments = '' === ( $expected['comment_status'] ?? null );
+	$keep_pings    = '' === ( $expected['ping_status'] ?? null );
+	if ( 'draft' !== $post->post_status || ( ! $keep_comments && ! $keep_pings ) ) {
+		return null;
+	}
+	$id = $post->ID;
+	return static function ( $data, $postarr ) use ( $id, $keep_comments, $keep_pings, &$request ) {
+		if ( (int) ( $postarr['ID'] ?? 0 ) !== $id || ! $request || ! is_rest_metadata_write( $request ) ) {
+			return $data;
+		}
+		if ( $keep_comments && '' === $postarr['comment_status'] && 'closed' === $data['comment_status'] ) {
+			$data['comment_status'] = '';
+		}
+		if ( $keep_pings && '' === $postarr['ping_status'] && '' !== $data['ping_status']
+			&& get_default_comment_status( $postarr['post_type'], 'pingback' ) === $data['ping_status'] ) {
+			$data['ping_status'] = '';
+		}
+		return $data;
+	};
+}
+
 /** Scope the final conflict check to core's update of this item. */
 function save_metadata( array $item, array $changes, array $links, \WP_Post $baseline ) {
 	$id       = $item['id'];
 	$expected = metadata_columns( $baseline, $changes );
 	$conflict = null;
 	$request  = null;
-	// On update, core fills an empty comment status with 'closed' and an empty ping status with the site default.
-	// Restore only those defaults before normal post-data filters run. The final prepared-value check still applies.
-	$preserve_discussion = static function ( $data, $postarr ) use ( $id, $expected, &$request ) {
-		if ( (int) ( $postarr['ID'] ?? 0 ) !== $id || ! $request || ! is_rest_metadata_write( $request ) ) {
-			return $data;
-		}
-		if ( '' === $expected['comment_status'] && '' === $postarr['comment_status'] && 'closed' === $data['comment_status'] ) {
-			$data['comment_status'] = '';
-		}
-		if ( '' === $expected['ping_status'] && '' === $postarr['ping_status'] && '' !== $data['ping_status']
-			&& get_default_comment_status( $postarr['post_type'], 'pingback' ) === $data['ping_status'] ) {
-			$data['ping_status'] = '';
-		}
-		return $data;
-	};
 
 	$guard = static function ( $post_id, $data ) use ( $item, $changes, $links, $expected, $id, &$conflict ) {
 		if ( $post_id !== $id || ! is_rest_metadata_write() ) {
@@ -933,8 +941,8 @@ function save_metadata( array $item, array $changes, array $links, \WP_Post $bas
 	add_action( $insert_hook, $guard_related, PHP_INT_MAX, 2 );
 	$prepare_hook = 'rest_pre_insert_' . $baseline->post_type;
 	add_filter( $prepare_hook, $preserve_date, PHP_INT_MAX, 2 );
-	$preserve_empty = 'draft' === $baseline->post_status && ( '' === $expected['comment_status'] || '' === $expected['ping_status'] );
-	if ( $preserve_empty ) {
+	$preserve_discussion = draft_discussion_filter( $baseline, $expected, $request );
+	if ( $preserve_discussion ) {
 		add_filter( 'wp_insert_post_data', $preserve_discussion, PHP_INT_MIN, 2 );
 	}
 	add_action( 'pre_post_update', $guard, PHP_INT_MAX, 2 );
@@ -945,7 +953,7 @@ function save_metadata( array $item, array $changes, array $links, \WP_Post $bas
 	} finally {
 		remove_action( $insert_hook, $guard_related, PHP_INT_MAX );
 		remove_filter( $prepare_hook, $preserve_date, PHP_INT_MAX );
-		if ( $preserve_empty ) {
+		if ( $preserve_discussion ) {
 			remove_filter( 'wp_insert_post_data', $preserve_discussion, PHP_INT_MIN );
 		}
 		remove_action( 'pre_post_update', $guard, PHP_INT_MAX );
