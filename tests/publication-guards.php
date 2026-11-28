@@ -1,5 +1,7 @@
 <?php
 /** Native regression checks for metadata saves and the PDF shown in publication previews. */
+use ChurchWebsiteConnector\RestTools;
+
 require_once '/wordpress/wp-load.php';
 
 if ( file_exists( '/provider-fixtures/GeneratePress-AI-MCP.php' ) ) {
@@ -487,6 +489,90 @@ function guard_date_preview( $id, $date ) {
 	$state = guard_ok( guard_call( 'get-post-workflow', array( 'id' => $id ) ) )['post'];
 	return guard_ok( guard_call( 'preview-draft-date', array( 'id' => $id, 'state_hash' => $state['state_hash'], 'date_local' => $date ) ) );
 }
+
+// Exercise the poster workflow with the empty settings a native draft insert can store.
+$events = guard_ok( wp_insert_term( 'Poster events', 'category' ) )['term_id'];
+$upload = wp_upload_bits( 'events-poster.png', null, file_get_contents( ABSPATH . 'wp-includes/images/w-logo-blue-white-bg.png' ) );
+$poster = guard_ok(
+	wp_insert_attachment(
+		array(
+			'post_title'     => 'Events poster',
+			'post_mime_type' => 'image/png',
+		),
+		$upload['file'],
+		0,
+		true
+	)
+);
+add_filter( 'get_default_comment_status', '__return_empty_string' );
+try {
+	$poster_post = guard_ok(
+		wp_insert_post(
+			array(
+				'post_title'    => 'Service with a poster',
+				'post_name'     => 'service-with-a-poster',
+				'post_status'   => 'draft',
+				'post_content'  => '<!-- wp:paragraph --><p>Service details</p><!-- /wp:paragraph -->',
+				'post_category' => array( $events ),
+			),
+			true
+		)
+	);
+} finally {
+	remove_filter( 'get_default_comment_status', '__return_empty_string' );
+}
+$image = guard_ok( guard_call( 'preview-item-update', guard_state( $poster_post, true ) + array( 'changes' => array( 'featured_media' => $poster ) ) ) );
+guard_ok( guard_apply( $image ) );
+$before = RestTools\metadata_columns( RestTools\stored_post( $poster_post ) );
+guard_assert( '' === $before['comment_status'] && '' === $before['ping_status'] && '0000-00-00 00:00:00' === $before['post_date_gmt'], 'The featured poster draft is undated and has both discussion choices empty' );
+$when         = wp_date( 'Y-m-d', time() - 2 * DAY_IN_SECONDS ) . 'T12:00:00';
+$substitution = static function ( $data, $args ) use ( $poster_post ) {
+	if ( (int) ( $args['ID'] ?? 0 ) === $poster_post ) {
+		$data['ping_status'] = 'open';
+	}
+	return $data;
+};
+
+$date = guard_date_preview( $poster_post, $when );
+add_filter( 'wp_insert_post_data', $substitution, 10, 2 );
+try {
+	$refused = guard_apply( $date, 'apply-post-edit', 'approved' );
+} finally {
+	remove_filter( 'wp_insert_post_data', $substitution );
+}
+$after = RestTools\metadata_columns( RestTools\stored_post( $poster_post ) );
+guard_assert( guard_error( $refused, 'post_guard' ) && $after === $before, 'A later ping-status substitution still prevents the date save and leaves the reviewed row intact' );
+
+$date = guard_date_preview( $poster_post, $when );
+guard_ok( guard_apply( $date, 'apply-post-edit', 'approved' ) );
+$expected                  = $before;
+$expected['post_date']     = str_replace( 'T', ' ', $when );
+$expected['post_date_gmt'] = get_gmt_from_date( $expected['post_date'] );
+$after                     = RestTools\metadata_columns( RestTools\stored_post( $poster_post ) );
+guard_assert( $after === $expected, 'A reviewed date changes only the dates and keeps the draft, wording and both empty settings' );
+guard_assert( array( $events ) === wp_get_post_categories( $poster_post ) && get_post_thumbnail_id( $poster_post ) === $poster, 'A dated draft keeps its poster and category' );
+guard_assert( is_wp_error( guard_apply( $date, 'apply-post-edit', 'approved' ) ), 'The successful date approval on the poster draft cannot be reused' );
+
+$state   = guard_ok( guard_call( 'get-post-workflow', array( 'id' => $poster_post ) ) )['post'];
+$publish = array(
+	'id'         => $poster_post,
+	'state_hash' => $state['state_hash'],
+);
+$review  = guard_ok( guard_call( 'preview-draft-publish', $publish ) );
+add_filter( 'wp_insert_post_data', $substitution, 10, 2 );
+try {
+	$refused = guard_apply( $review, 'apply-draft-publish', 'confirm_publish' );
+} finally {
+	remove_filter( 'wp_insert_post_data', $substitution );
+}
+guard_assert( guard_error( $refused, 'post_guard' ) && 'draft' === get_post_status( $poster_post ), 'A later ping-status substitution also stops first publication of the reviewed draft' );
+$review = guard_ok( guard_call( 'preview-draft-publish', $publish ) );
+guard_ok( guard_apply( $review, 'apply-draft-publish', 'confirm_publish' ) );
+$expected['post_status'] = 'publish';
+$after                   = RestTools\metadata_columns( RestTools\stored_post( $poster_post ) );
+guard_assert( $after === $expected, 'Separate publication approval keeps the date, wording and both empty discussion settings' );
+guard_assert( array( $events ) === wp_get_post_categories( $poster_post ) && get_post_thumbnail_id( $poster_post ) === $poster, 'First publication keeps the reviewed poster and category' );
+
 $draft = wp_insert_post( array( 'post_title' => 'Draft date review', 'post_status' => 'draft' ) );
 global $wpdb;
 $wpdb->update( $wpdb->posts, array( 'post_date' => '2026-01-02 09:00:00' ), array( 'ID' => $draft ) );

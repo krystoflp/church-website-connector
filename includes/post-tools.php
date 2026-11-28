@@ -682,6 +682,13 @@ function commit( \WP_Post $post, array $plan, bool $editorial, ?string $related_
 	if ( null !== $related_condition ) {
 		// Keep the native types for strict read-back, including integer post_parent and menu_order.
 		$protected = array_intersect_key( get_object_vars( $post ), RestTools\metadata_columns( $post ) );
+	} elseif ( 'draft' === $post->post_status && 'publish' === ( $plan['expected']['post_status'] ?? null ) ) {
+		// First publication of a dated draft must also retain its reviewed empty discussion settings.
+		foreach ( array( 'comment_status', 'ping_status' ) as $field ) {
+			if ( '' === $post->$field ) {
+				$protected[ $field ] = '';
+			}
+		}
 	}
 	$expected = $plan['expected'] + $protected;
 	$request  = new \WP_REST_Request( 'POST', RestTools\route( $post->post_type, $id ) );
@@ -756,12 +763,19 @@ function commit( \WP_Post $post, array $plan, bool $editorial, ?string $related_
 
 	$prepare_hook = 'rest_pre_insert_' . $post->post_type;
 	add_filter( $prepare_hook, $prepare, PHP_INT_MAX, 2 );
+	$preserve_discussion = RestTools\draft_discussion_filter( $post, $expected, $request );
+	if ( $preserve_discussion ) {
+		add_filter( 'wp_insert_post_data', $preserve_discussion, PHP_INT_MIN, 2 );
+	}
 	add_filter( 'wp_insert_post_data', $preserve_blocks, PHP_INT_MAX, 2 );
 	add_action( 'pre_post_update', $verify, PHP_INT_MAX, 2 );
 	try {
 		$response = rest_do_request( $request );
 	} finally {
 		remove_filter( $prepare_hook, $prepare, PHP_INT_MAX );
+		if ( $preserve_discussion ) {
+			remove_filter( 'wp_insert_post_data', $preserve_discussion, PHP_INT_MIN );
+		}
 		remove_filter( 'wp_insert_post_data', $preserve_blocks, PHP_INT_MAX );
 		remove_action( 'pre_post_update', $verify, PHP_INT_MAX );
 		remove_filter( 'query', $veto, $veto_priority );
