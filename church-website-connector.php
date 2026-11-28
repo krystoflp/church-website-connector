@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: Church Website Connector
+ * Plugin Name: ChurchWeb Connector
  * Description: Prepares GeneratePress AI and WP Rocket connections, allows the official Codex client, adds protected tools through MCP, and provides website configuration including Imagify PDF protection.
- * Version: 1.13.8
+ * Version: 1.14.0
  * Requires at least: 7.0
  * Requires PHP: 8.3
  * Author: Church Website Toolkit
@@ -17,7 +17,7 @@ namespace ChurchWebsiteConnector;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION  = '1.13.8';
+const VERSION  = '1.14.0';
 const SETTINGS = 'church_website_connector_settings';
 
 function settings(): array {
@@ -84,10 +84,13 @@ function reviewed_identity( array $saved ): array {
 
 /** Legacy URL-only settings need one explicit review since their origin cannot be distinguished after migration. */
 function is_bound(): bool {
+	return settings_are_bound( settings() );
+}
+
+function settings_are_bound( array $saved ): bool {
 	if ( is_multisite() ) {
 		return false;
 	}
-	$saved    = settings();
 	$identity = current_identity();
 	return 1 === ( $saved['schema'] ?? null ) && true === ( $saved['enabled'] ?? false ) && empty( $saved['grant_cleanup_pending'] )
 		&& valid_identity( $identity ) && settings_match( $saved, $identity ) && reviewed_identity( $saved ) === $identity;
@@ -102,7 +105,7 @@ function legacy_used_css(): array {
 }
 
 function feature_enabled( string $feature ): bool {
-	return is_bound() && true === ( settings()[ $feature ] ?? in_array( $feature, array( 'rest_tools', 'imagify_pdf_protection' ), true ) );
+	return is_bound() && true === ( settings()[ $feature ] ?? in_array( $feature, array( 'rest_tools', 'imagify_pdf_protection', 'disable_comments' ), true ) );
 }
 
 /** Grant only the current administrator, and only when native Used CSS is ready. */
@@ -136,7 +139,7 @@ function settings_review_action( $stored, array $identity ): string {
 }
 
 function settings_conflict(): \WP_Error {
-	return new \WP_Error( 'church_connector_settings_changed', 'The saved settings or website address changed during review. Reload Website Connector settings to review them again.', array( 'status' => 409 ) );
+	return new \WP_Error( 'church_connector_settings_changed', 'The saved settings or website address changed during review. Reload ChurchWeb Connector settings to review them again.', array( 'status' => 409 ) );
 }
 
 /** Apply native option filters, then condition the write on the exact reviewed database row. */
@@ -212,6 +215,7 @@ function configure( array $flags, string $reviewed_binding = '' ) {
 	}
 	// Missing flags in older callers preserve this configuration choice; new or legacy absence receives the enabled default.
 	$saved['imagify_pdf_protection'] = ( $flags['imagify_pdf_protection'] ?? $previous['imagify_pdf_protection'] ?? true ) === true;
+	$saved['disable_comments']       = ( $flags['disable_comments'] ?? $previous['disable_comments'] ?? true ) === true;
 	$saved['rest_tools']             = ( $flags['rest_tools'] ?? true ) === true;
 	$saved['redirection_tools']      = ( $flags['redirection_tools'] ?? false ) === true;
 	foreach ( array( 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools' ) as $key ) {
@@ -268,10 +272,10 @@ function configure( array $flags, string $reviewed_binding = '' ) {
 
 function activate( $network_wide = false ): void {
 	if ( $network_wide || is_multisite() ) {
-		wp_die( 'Church Website Connector currently supports single-site WordPress only.' );
+		wp_die( 'ChurchWeb Connector currently supports single-site WordPress only.' );
 	}
 	if ( ! current_user_can( 'activate_plugins' ) || ! current_user_can( 'manage_options' ) ) {
-		wp_die( 'An administrator must activate Church Website Connector.' );
+		wp_die( 'An administrator must activate ChurchWeb Connector.' );
 	}
 	// Only a missing settings option identifies a new installation. A copy or
 	// unrecognised configuration must be reviewed in Settings before rebinding.
@@ -287,6 +291,7 @@ function activate( $network_wide = false ): void {
 		'used_css'               => true,
 		'rest_tools'             => true,
 		'imagify_pdf_protection' => true,
+		'disable_comments'       => true,
 		'redirection_tools'      => true,
 		'tsf_tools'              => true,
 		'rankmath_tools'         => true,
@@ -308,10 +313,13 @@ function activate( $network_wide = false ): void {
 
 // Configuration hooks load on every request, independently of MCP readiness or sign-in.
 require_once __DIR__ . '/includes/configuration.php';
+require_once __DIR__ . '/includes/discussion.php';
 require_once __DIR__ . '/includes/used-css.php';
+require_once __DIR__ . '/includes/page-cache.php';
 require_once __DIR__ . '/includes/compatibility.php';
 require_once __DIR__ . '/includes/rest-tools.php';
 require_once __DIR__ . '/includes/post-files.php';
+require_once __DIR__ . '/includes/post-details.php';
 require_once __DIR__ . '/includes/post-tools.php';
 require_once __DIR__ . '/includes/editorial.php';
 require_once __DIR__ . '/includes/navigation.php';

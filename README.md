@@ -1,4 +1,4 @@
-# Church Website Connector
+# ChurchWeb Connector
 
 A reusable WordPress plugin for GeneratePress AI and WP Rocket connections,
 website configuration including Imagify PDF protection, protected Used CSS operations,
@@ -8,20 +8,28 @@ Redirection, The SEO Framework, Rank Math, Code Snippets and WS Form Pro managem
 This independent GPL-2.0-or-later plugin is not an official GeneratePress or WP
 Rocket product. Vendor plugins and commercial licences are separate.
 
+## Public discussion
+
+**Settings → ChurchWeb Connector → Disable comments, pingbacks and trackbacks sitewide** closes new public discussion, including on posts that previously accepted comments. Published comments remain visible. This setting defaults on and remembers an administrator’s opt-out.
+
+## Single-page cache clearing
+
+ChurchWeb Connector 1.14.0 adds `church-connector/clear-page-cache` on the verified GeneratePress MCP connection. Supply the bound site address and one public URL. A website project’s standing authorisation covers a necessary single-page clear. WP Rocket 3.24.x checks the account’s permission. The tool preserves cached child pages and siblings. Check the public page after the clear.
+
 ## Install and enable automatic updates
 
 1. Download the versioned `church-website-connector-X.Y.Z.zip` from
    [Releases](https://github.com/krystoflp/church-website-connector/releases).
 2. In WordPress, open **Plugins → Add Plugin → Upload Plugin**. Upload the ZIP,
    activate it, or replace the existing connector when upgrading.
-3. Open **Settings → Website Connector**. On an upgrade from older address
+3. Open **Settings → ChurchWeb Connector**. On an upgrade from older address
    records or after copying a site, review both the Site Address and WordPress
    Address. Confirm only once you recognise this installation. The copied setup
    message identifies any remaining prerequisite and the selected connection.
    Codex desktop is the tested client. ChatGPT web support is unverified.
 4. New 1.7.3 installations select automatic updates once. For an existing installation,
-   on **Plugins → Installed Plugins**, choose **Enable auto-updates** for Church
-   Website Connector. WordPress's normal schedule and hosting policy apply.
+   on **Plugins → Installed Plugins**, choose **Enable auto-updates** for
+   ChurchWeb Connector. WordPress's normal schedule and hosting policy apply.
 
 Requires PHP 8.3+, single-site WordPress 7.0+, compatible GeneratePress AI/MCP and
 optional WP Rocket integration. Read [the plugin guide](readme.txt) for compatibility,
@@ -55,7 +63,7 @@ is installed from ordinary site visits or automatic connector upgrades.
 
 ## Optional integrations
 
-Choose the integrations in **Settings → Website Connector**, then
+Choose the integrations in **Settings → ChurchWeb Connector**, then
 refresh your connection. The SEO Framework and Rank Math cover individual SEO
 fields and selected site-wide settings, including sitemaps. Code Snippets Free
 supports reviewed management; new snippets stay inactive, and activation or
@@ -111,13 +119,13 @@ GPL-2.0-or-later. See [LICENSE](LICENSE).
 
 ## Checking for connector updates
 
-From 1.13.7, opening **Settings → Website Connector** with plugin-update permission
+From 1.13.7, opening **Settings → ChurchWeb Connector** with plugin-update permission
 checks GitHub for the latest stable release when a fresh check is due. A newer
 release marks the installed version amber and shows both version numbers. Settings
 visits reuse successful checks for 12 hours and retry failures after 15 minutes.
 WordPress continues to manage automatic installation according to the site's settings.
 
-In **Settings → Website Connector → Automatic updates**, select **Check for updates
+In **Settings → ChurchWeb Connector → Automatic updates**, select **Check for updates
 now**. The nonce-protected administrator action bypasses both successful and failed
 GitHub caches and refreshes only the connector’s native WordPress update entry.
 It reports whether a stable update is available, the installed version is current
@@ -129,7 +137,7 @@ information. The button requires both settings and plugin-update permissions and
 appears once the website has installed 1.7.1 or newer.
 
 From **1.7.2**, update-check success, warning and error messages appear directly
-below the Website Connector page heading, where they are visible after the page
+below the ChurchWeb Connector page heading, where they are visible after the page
 refreshes. The check button remains in the Automatic updates section.
 
 ## Administrator setup and maintenance in 1.7.3
@@ -146,7 +154,7 @@ notice, readiness row and setup panel. Failure, interruption or a blocked setup
 shows the action needed. Other dependency warnings and native readiness checks
 remain accurate; installers still run only in authorised administrator setup.
 
-Settings → Website Connector starts with a compact version, update-history,
+Settings → ChurchWeb Connector starts with a compact version, update-history,
 auto-update and connection summary. It includes a copyable diagnostic report that
 is also available in native Site Health Info. The report is allowlisted and omits
 addresses, credentials, licence data, raw errors, account/activity records, content,
@@ -186,7 +194,7 @@ the installed package versions.
 
 ## Website configuration in 1.8.0
 
-**Settings → Website Connector → Settings** includes **Prevent Imagify
+**Settings → ChurchWeb Connector → Settings** includes **Prevent Imagify
 from optimising PDFs**. It uses the documented `imagify_get_mime_types` filter to
 remove only `pdf`, across ordinary uploads, bulk/manual optimisation and background
 workers, independently of MCP sign-in. Images and other code’s exclusions stay in
@@ -207,7 +215,7 @@ existing identity and update channel. See [the plugin guide](readme.txt).
 
 ## GeneratePress AI setup in 1.9.2
 
-At the top of **Settings → Website Connector**, fill the GeneratePress One licence
+At the top of **Settings → ChurchWeb Connector**, fill the GeneratePress One licence
 field through your 1Password browser extension, or paste the key, then choose
 **Install and activate GeneratePress AI**. Additional-field autofill may need a
 one-time mapping. WordPress administrator permissions, the saved website binding
@@ -237,7 +245,7 @@ single GeneratePress connection. **Allow official Codex sign-in through the
 alternative WP Rocket connection** is set to disabled. The action enables tools
 for existing authorised GeneratePress clients as described on the settings page.
 
-It also enables native automatic-update preferences for **Website Connector itself**
+It also enables native automatic-update preferences for **ChurchWeb Connector itself**
 and the installed plugins listed on the page: MCP Adapter, GeneratePress AI,
 GenerateBlocks, WP Rocket, Imagify, Redirection, The SEO Framework, Rank Math,
 Code Snippets and WS Form Pro. Unrelated plugin preferences remain unchanged.
@@ -297,7 +305,7 @@ retain their error status. Reading the status changes no settings or caches.
 
 Pending initial MCP Adapter setup survives Save settings and Restore to defaults.
 It can start on the Installed Plugins confirmation after single or bulk activation,
-as well as on Website Connector settings. Setup still uses an administrator's
+as well as on ChurchWeb Connector settings. Setup still uses an administrator's
 nonce-protected request, site binding, native permissions, expiry and one attempt.
 Ordinary visits and unattended connector updates do not install plugins; deliberate
 adapter deactivation after completed setup remains respected. If JavaScript is

@@ -84,6 +84,60 @@ rest_check( ! is_wp_error( $draft_plan ) && ! is_wp_error( apply_token( $draft_p
 
 $wp_rewrite->set_permalink_structure( $old_structure );
 
+// Native draft inserts can store empty discussion defaults. The first metadata edit must retain them.
+$poster_category = wp_insert_term( 'Service posters', 'category' )['term_id'];
+$upload          = wp_upload_bits( 'service-poster.png', null, file_get_contents( ABSPATH . 'wp-includes/images/w-logo-blue-white-bg.png' ) );
+$poster_media    = wp_insert_attachment( array( 'post_title' => 'Service poster', 'post_mime_type' => 'image/png' ), $upload['file'] );
+rest_check( ! $upload['error'] && $poster_media > 0, 'Native image fixture available for the draft' );
+add_filter( 'get_default_comment_status', '__return_empty_string' );
+$poster_draft = wp_insert_post(
+	array(
+		'post_title'    => 'Draft service poster',
+		'post_status'   => 'draft',
+		'post_name'     => 'draft-service-poster',
+		'post_content'  => '<!-- wp:paragraph --><p>Service times</p><!-- /wp:paragraph -->',
+		'post_category' => array( $poster_category ),
+	),
+	true
+);
+remove_filter( 'get_default_comment_status', '__return_empty_string' );
+$original = RestTools\stored_post( $poster_draft );
+rest_check( '' === $original->comment_status && '' === $original->ping_status && '0000-00-00 00:00:00' === $original->post_modified_gmt, 'New undated draft has both saved discussion settings empty' );
+$image_change = array( 'featured_media' => $poster_media );
+$review       = preview_item( 'post', $poster_draft, $image_change );
+rest_check( array( 'featured_media' ) === array_keys( $review['diff'] ) && 0 === get_post_thumbnail_id( $poster_draft ), 'Draft review proposes only the featured image' );
+$refused = wp_get_ability( 'church-connector/apply-item-update' )->execute(
+	array( 'site_url' => Connector\bound_site(), 'approved' => false, 'preview_token' => $review['preview_token'] )
+);
+rest_check( is_wp_error( $refused ) && 0 === get_post_thumbnail_id( $poster_draft ), 'Draft image still requires approval' );
+
+// A change after core prepares its defaults must reach the final check.
+$change_ping = static function ( $data, $postarr ) use ( $poster_draft ) {
+	if ( (int) $postarr['ID'] === $poster_draft ) {
+		$data['ping_status'] = 'closed';
+	}
+	return $data;
+};
+add_filter( 'wp_insert_post_data', $change_ping, 10, 2 );
+$refused = apply_token( $review );
+remove_filter( 'wp_insert_post_data', $change_ping );
+rest_check( is_wp_error( $refused ) && 'church_connector_rest_substituted' === $refused->get_error_code() && str_contains( $refused->get_error_message(), 'ping_status' ) && 0 === get_post_thumbnail_id( $poster_draft ) && '' === get_post( $poster_draft )->ping_status, 'A subsequent discussion substitution stops the write and identifies the field' );
+
+$review = preview_item( 'post', $poster_draft, $image_change );
+wp_set_post_categories( $poster_draft, array( (int) get_option( 'default_category' ) ) );
+$refused = apply_token( $review );
+rest_check( is_wp_error( $refused ) && 'church_connector_rest_stale' === $refused->get_error_code() && 0 === get_post_thumbnail_id( $poster_draft ) && array( (int) get_option( 'default_category' ) ) === wp_get_post_categories( $poster_draft ), 'A category change invalidates the image approval and survives' );
+wp_set_post_categories( $poster_draft, array( $poster_category ) );
+$review = preview_item( 'post', $poster_draft, $image_change );
+$result = apply_token( $review );
+$stored = RestTools\stored_post( $poster_draft );
+rest_check( ! is_wp_error( $result ) && array( 'featured_media' ) === $result['changed_fields'] && $poster_media === get_post_thumbnail_id( $poster_draft ), 'Approved image is stored and read back on an undated draft' );
+rest_check( RestTools\metadata_columns( $stored ) === RestTools\metadata_columns( $original ) && array( $poster_category ) === wp_get_post_categories( $poster_draft ), 'Draft body, dates, slug, status, author, discussion settings and category survive the first image save' );
+rest_check( is_wp_error( apply_token( $review ) ), 'Successful draft image approval is single use' );
+$review = preview_item( 'post', $poster_draft, array( 'ping_status' => 'closed' ) );
+$result = apply_token( $review );
+rest_check( ! is_wp_error( $result ) && 'closed' === get_post( $poster_draft )->ping_status && '' === get_post( $poster_draft )->comment_status, 'An explicitly reviewed discussion change saves while the other empty setting is preserved' );
+
 // Substitutions before storage, concurrent saves at claim, and unavailable read-back.
 $target = hierarchy_page( 'Reviewed metadata' );
 $plan   = preview_item( 'page', $target, array( 'title' => 'Approved title' ) );

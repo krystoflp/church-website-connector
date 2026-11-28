@@ -310,7 +310,7 @@ function site_health( array $info ): array {
 	$report = diagnostic_report();
 	if ( ! is_wp_error( $report ) ) {
 		$info['church-website-connector'] = array(
-			'label'  => 'Church Website Connector',
+			'label'  => 'ChurchWeb Connector',
 			'fields' => array(
 				'status' => array(
 					'label' => __( 'Diagnostic report', 'church-website-connector' ),
@@ -443,7 +443,7 @@ function activity_page(): void {
 	}
 	if ( ! $rows ) {
 		echo '<tr><td colspan="6">' . esc_html__( 'No connector changes have been recorded yet.', 'church-website-connector' ) . '</td></tr>'; }
-	echo '</tbody></table><p><a href="' . esc_url( admin_url( 'options-general.php?page=church-website-connector' ) ) . '">' . esc_html__( 'Website Connector settings', 'church-website-connector' ) . '</a></p></div>';
+	echo '</tbody></table><p><a href="' . esc_url( admin_url( 'options-general.php?page=church-website-connector' ) ) . '">' . esc_html__( 'ChurchWeb Connector settings', 'church-website-connector' ) . '</a></p></div>';
 }
 
 function menu(): void {

@@ -66,7 +66,7 @@ def main():
         blueprint = json.loads(template.replace('__CONNECTOR_VERSION__', version)
                                .replace('__CONNECTOR_ZIP_SHA256__', digest))
         blueprint['preferredVersions'] = {'wp': wp, 'php': '8.3'}
-        for name in ['styled-overlay.php', 'publication-guards.php', 'pdf-editor-integration.php', 'metadata-guards.php', 'settings-safety.php', 'used-css-grants.php', 'maintenance-integration.php', 'updates-integration.php']:
+        for name in ['styled-overlay.php', 'publication-guards.php', 'pdf-editor-integration.php', 'metadata-guards.php', 'discussion.php', 'settings-safety.php', 'used-css-grants.php', 'maintenance-integration.php', 'updates-integration.php']:
             code = (tests / name).read_text().replace('__CURRENT_VERSION__', version).replace('__FUTURE_VERSION__', future)
             if name == 'used-css-grants.php':
                 code = code.replace('<?php', "<?php define('CWC_TEST_USED_CSS_GRANTS', true);", 1)
@@ -91,7 +91,7 @@ def main():
         if version_parts(install['wordpress']) != version_parts(wp):
             raise ValueError(f"Requested WordPress {wp}, booted {install['wordpress']}")
         if not (install['php'].startswith('8.3.') and install['admin_html_rendered'] and install['zip_sha256'] == digest
-                and status['anonymous_status_denied'] and admin['read_only_views'] and admin['admin_permissions']
+                and report('discussion')['checks'] and status['anonymous_status_denied'] and admin['read_only_views'] and admin['admin_permissions']
                 and updater['native_upgrade_completed'] and updater['tampered_package_rejected']
                 and updater['settings_and_grants_preserved'] and rest['permissions_preserved'] and report('styled-overlay')['published']):
             raise RuntimeError('Required native checks did not pass')

@@ -57,6 +57,7 @@ $before_fix=connector_plugin_row();
 updater_check(!str_contains($before_fix,'toggle-auto-update'),'Reproduced missing native control without update information');
 add_filter('all_plugins','ChurchWebsiteConnector\\Updates\\supported_plugin');
 $html=connector_plugin_row();
+updater_check( str_contains( $html, '<strong>ChurchWeb Connector</strong>' ) && $plugin === U\plugin_file() && 'https://github.com/krystoflp/church-website-connector' === get_plugins()[ $plugin ]['UpdateURI'], 'Installed Plugins shows ChurchWeb Connector under the original plugin file and update source' );
 updater_check(str_contains($html,'Disable auto-updates')&&str_contains($html,'data-wp-action="disable"'),'Native plugin row offers disabling before a successful GitHub check');
 updater_check(empty(get_site_transient('update_plugins')->response)&&empty(get_site_transient('update_plugins')->no_update),'Displaying the control does not invent release offers');
 update_site_option('auto_update_plugins',['other/keep.php']);$html=connector_plugin_row();
@@ -69,6 +70,7 @@ update_site_option('auto_update_plugins',$auto_before);
 // Register the settings page the same way as the native admin menu, under Settings.
 $GLOBALS['admin_page_hooks']['options-general.php'] = 'settings';
 ChurchWebsiteConnector\admin_menu();
+updater_check( in_array( 'ChurchWeb Connector', array_column( $GLOBALS['submenu']['options-general.php'], 0 ), true ), 'Settings menu shows ChurchWeb Connector' );
 $settings_load = 'load-' . get_plugin_page_hookname( U\SLUG, 'options-general.php' );
 updater_check( 'load-settings_page_church-website-connector' === $settings_load, 'The fixture dispatches the native Website Connector settings load hook' );
 
@@ -253,7 +255,7 @@ $metadata['requires_php'] = '8.3';
 U\check_now();
 $updates = get_site_transient('update_plugins'); unset( $updates->response['other/other.php'] ); $updates->translations = []; set_site_transient('update_plugins',$updates);
 $details = plugins_api( 'plugin_information', (object) [ 'slug' => U\SLUG ] );
-updater_check( ! is_wp_error( $details ) && $details->version === '__FUTURE_VERSION__', 'Native version details use GitHub release metadata' );
+updater_check( ! is_wp_error( $details ) && 'ChurchWeb Connector' === $details->name && 'church-website-connector' === $details->slug && $details->version === '__FUTURE_VERSION__', 'Native version details use GitHub release metadata' );
 update_site_option( 'auto_update_plugins', array_values( array_diff( (array) $auto_before, [ $plugin ] ) ) );
 $automatic = new WP_Automatic_Updater();
 updater_check( $automatic->should_update( 'plugin', $offer, WP_PLUGIN_DIR ) === false, 'Core refuses automatic installation without administrator opt-in' );

@@ -83,7 +83,7 @@ foreach ( array( 'none', 'generatepress', 'separate_connections' ) as $route ) {
 		C\admin_page();
 		$prompt = safety_copied_prompt( ob_get_clean() );
 		safety_check( $before_prompt === C\settings(), "Copying setup instructions preserves the settings for $route" );
-		safety_check( str_contains( $prompt, 'Settings > Website Connector' ) && ! str_contains( $prompt, 'church-connector/connection-status' ) && ! str_contains( $prompt, '/wp-json/' ), "An unavailable $route connection gives the administrator a next step before client discovery" );
+		safety_check( str_contains( $prompt, 'Settings > ChurchWeb Connector' ) && ! str_contains( $prompt, 'church-connector/connection-status' ) && ! str_contains( $prompt, '/wp-json/' ), "An unavailable $route connection gives the administrator a next step before client discovery" );
 		if ( 'none' === $route ) {
 			safety_check( str_contains( strtolower( $prompt ), 'disabled' ), 'The copied message identifies an intentionally disabled connection' );
 		} elseif ( 'generatepress' === $route ) {
@@ -191,7 +191,7 @@ ob_start();
 C\admin_page();
 $screen = ob_get_clean();
 $copy_prompt = safety_copied_prompt( $screen );
-safety_check( str_contains( $copy_prompt, 'Settings > Website Connector' ) && str_contains( $copy_prompt, 'both the Site Address and WordPress Address' ) && ! str_contains( $copy_prompt, '/wp-json/' ) && ! str_contains( $copy_prompt, 'sign-in' ) && ! str_contains( $copy_prompt, 'church-connector/connection-status' ), 'The copied message for an unbound site prioritises reviewing both addresses before sign-in or discovery' );
+safety_check( str_contains( $copy_prompt, 'Settings > ChurchWeb Connector' ) && str_contains( $copy_prompt, 'both the Site Address and WordPress Address' ) && ! str_contains( $copy_prompt, '/wp-json/' ) && ! str_contains( $copy_prompt, 'sign-in' ) && ! str_contains( $copy_prompt, 'church-connector/connection-status' ), 'The copied message for an unbound site prioritises reviewing both addresses before sign-in or discovery' );
 $off_on_copy = static fn( $choices ) => array_replace( $choices, array( 'generatepress_bridge' => false, 'codex' => false ) );
 add_filter( 'option_' . C\SETTINGS, $off_on_copy );
 try {

@@ -32,7 +32,7 @@ function status(): array {
 	$available  = class_exists( $class );
 	$version    = defined( $class . '::VERSION' ) ? (string) constant( $class . '::VERSION' ) : ( defined( 'WP_MCP_VERSION' ) ? (string) WP_MCP_VERSION : '' );
 	$compatible = $available && ( '' === $version || version_compare( $version, minimum_version(), '>=' ) );
-	$message    = __( 'MCP Adapter is missing or inactive. Open Website Connector settings to set up the separate WordPress.org plugin.', 'church-website-connector' );
+	$message    = __( 'MCP Adapter is missing or inactive. Open ChurchWeb Connector settings to set up the separate WordPress.org plugin.', 'church-website-connector' );
 	if ( $available ) {
 		$message = $compatible ? __( 'A compatible MCP Adapter is available. No additional installation is needed.', 'church-website-connector' ) : __( 'The active MCP Adapter is too old. Update its providing plugin before continuing.', 'church-website-connector' );
 	}
@@ -97,7 +97,7 @@ function presentation(): array {
 	if ( automatic_allowed() && ! is_wp_error( permission() ) ) {
 		return array(
 			'level'   => 'info',
-			'message' => __( 'MCP Adapter will be installed or activated automatically when you open Website Connector settings.', 'church-website-connector' ),
+			'message' => __( 'MCP Adapter will be installed or activated automatically when you open ChurchWeb Connector settings.', 'church-website-connector' ),
 		);
 	}
 	return array(

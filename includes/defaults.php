@@ -13,7 +13,7 @@ const ACTION = 'church_connector_restore_defaults';
 /** Limit update changes to the connector and the plugins named on its settings page. */
 function plugins(): array {
 	return array(
-		Connector\Updates\plugin_file()          => 'Website Connector',
+		Connector\Updates\plugin_file()          => 'ChurchWeb Connector',
 		Connector\AdapterSetup\PLUGIN_FILE       => 'MCP Adapter',
 		Connector\GeneratePressSetup\PLUGIN_FILE => 'GeneratePress AI',
 		'generateblocks/generateblocks.php'      => 'GenerateBlocks',
@@ -43,20 +43,21 @@ function flags(): array {
 		'snippets_tools'         => true,
 		'wsform_tools'           => true,
 		'imagify_pdf_protection' => true,
+		'disable_comments'       => true,
 	);
 }
 
 /** Validate before any mutation; opening settings and ordinary upgrades do not reset choices. */
 function restore_request( array $input ) {
 	if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
-		return new \WP_Error( 'church_connector_defaults_method', __( 'Use Restore to defaults in Website Connector settings.', 'church-website-connector' ), array( 'status' => 405 ) );
+		return new \WP_Error( 'church_connector_defaults_method', __( 'Use Restore to defaults in ChurchWeb Connector settings.', 'church-website-connector' ), array( 'status' => 405 ) );
 	}
 	if ( ! is_user_logged_in() || ! current_user_can( 'manage_options' ) || ! current_user_can( 'update_plugins' ) || ! Connector\is_bound() ) {
 		return new \WP_Error( 'church_connector_defaults_permission', __( 'An administrator with plugin update rights must review and save this website before restoring defaults.', 'church-website-connector' ), array( 'status' => 403 ) );
 	}
 	if ( ( $input['action'] ?? '' ) !== ACTION || ! is_string( $input['_wpnonce'] ?? null ) || ! wp_verify_nonce( $input['_wpnonce'], ACTION )
 		|| array_diff( array_keys( $input ), array( 'action', '_wpnonce', '_wp_http_referer', 'cwc-restore-defaults' ) ) ) {
-		return new \WP_Error( 'church_connector_defaults_nonce', __( 'This restore request is invalid or expired. Reload Website Connector settings.', 'church-website-connector' ), array( 'status' => 403 ) );
+		return new \WP_Error( 'church_connector_defaults_nonce', __( 'This restore request is invalid or expired. Reload ChurchWeb Connector settings.', 'church-website-connector' ), array( 'status' => 403 ) );
 	}
 	$result = Connector\configure( flags() );
 	if ( is_wp_error( $result ) ) {
@@ -147,7 +148,7 @@ function render_notice(): void {
 
 /** Keep the deliberate restore action visible beside the connector summary. */
 function render(): void {
-	echo '<section aria-labelledby="cwc-defaults-title"><h3 id="cwc-defaults-title">' . esc_html__( 'Restore connector defaults', 'church-website-connector' ) . '</h3><p id="cwc-defaults-help">' . esc_html__( 'Enable all connector settings and configuration options, including tools for existing authorised GeneratePress connections. Leave “Allow official Codex sign-in through the alternative WP Rocket connection” disabled. Enable automatic updates for Website Connector itself and the installed plugins listed below, subject to website policy. This does not install plugins, activate licences or run updates now.', 'church-website-connector' ) . '</p><p>' . esc_html( implode( ', ', plugins() ) ) . '.</p>';
+	echo '<section aria-labelledby="cwc-defaults-title"><h3 id="cwc-defaults-title">' . esc_html__( 'Restore connector defaults', 'church-website-connector' ) . '</h3><p id="cwc-defaults-help">' . esc_html__( 'Enable all connector settings and configuration options, including tools for existing authorised GeneratePress connections. Leave “Allow official Codex sign-in through the alternative WP Rocket connection” disabled. Enable automatic updates for ChurchWeb Connector itself and the installed plugins listed below, subject to website policy. This does not install plugins, activate licences or run updates now.', 'church-website-connector' ) . '</p><p>' . esc_html( implode( ', ', plugins() ) ) . '.</p>';
 	if ( Connector\is_bound() && current_user_can( 'update_plugins' ) ) {
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 		wp_nonce_field( ACTION );

@@ -29,13 +29,13 @@ function permission( $input = null ) {
 
 function environment() {
     if ( ! \ChurchWebsiteConnector\is_bound() ) {
-        return error( 'wrong_site', 'Enable the connection helpers for this exact website in Settings → Website Connector.', 403 );
+        return error( 'wrong_site', 'Enable the connection helpers for this exact website in Settings → ChurchWeb Connector.', 403 );
     }
     if ( ! \ChurchWebsiteConnector\feature_enabled( 'used_css' ) ) {
-        return error( 'disabled', 'Used CSS clearing is switched off in Settings → Website Connector.', 503 );
+        return error( 'disabled', 'Used CSS clearing is switched off in Settings → ChurchWeb Connector.', 503 );
     }
     if ( \ChurchWebsiteConnector\legacy_used_css() ) {
-        return error( 'legacy_helper', 'An earlier Used CSS helper is active. Keep an administrator session open, deactivate that helper, then save Website Connector settings.', 503 );
+        return error( 'legacy_helper', 'An earlier Used CSS helper is active. Keep an administrator session open, deactivate that helper, then save ChurchWeb Connector settings.', 503 );
     }
     if ( ! defined( 'WP_ROCKET_VERSION' ) || version_compare( WP_ROCKET_VERSION, '3.24', '<' ) || version_compare( WP_ROCKET_VERSION, '3.25', '>=' ) ) {
         return error( 'unsupported_version', 'This release requires WP Rocket 3.24.x. Recheck compatibility after a major/minor update.', 503 );
@@ -365,8 +365,7 @@ function audit( array $record ): void {
 }
 
 /** Keep WP Rocket's Varnish request scoped to the exact canonical URL of this page. */
-function clear_page( $controller, string $canonical ): void {
-	$url     = untrailingslashit( $canonical );
+function with_exact_cache_url( string $canonical, callable $operation ): void {
 	$host    = wp_parse_url( $canonical, PHP_URL_HOST );
 	$path    = wp_parse_url( $canonical, PHP_URL_PATH ) ?? '/';
 	$varnish = trailingslashit( $path );
@@ -380,10 +379,19 @@ function clear_page( $controller, string $canonical ): void {
 	};
 	add_filter( 'rocket_parse_url', $exact, PHP_INT_MIN );
 	try {
-		$controller->clear_url_usedcss( $url );
+		$operation();
 	} finally {
 		remove_filter( 'rocket_parse_url', $exact, PHP_INT_MIN );
 	}
+}
+
+function clear_page( $controller, string $canonical ): void {
+	with_exact_cache_url(
+		$canonical,
+		static function () use ( $controller, $canonical ) {
+			$controller->clear_url_usedcss( untrailingslashit( $canonical ) );
+		}
+	);
 }
 
 function clear( $input ) {
@@ -457,7 +465,7 @@ function admin_page(): void {
     echo '<div class="wrap"><h1>Church Website Used CSS</h1><p>Site: ' . esc_html( site() ) . '</p>';
     echo '<p><strong>' . esc_html( $status['message'] ) . '</strong></p>';
     echo '<p>WP Rocket: ' . esc_html( (string) $status['wp_rocket_version'] ) . '. Cooldown remaining: ' . esc_html( (string) $status['cooldown_seconds_remaining'] ) . ' seconds.</p>';
-    echo '<p>MCP abilities: <code>church-connector/used-css-status</code> (read-only) and <code>church-connector/clear-used-css</code> (write). Only an eligible administrator activating or saving Website Connector settings receives the additional clearing permission. Use client approval for the write action.</p>';
+    echo '<p>MCP abilities: <code>church-connector/used-css-status</code> (read-only) and <code>church-connector/clear-used-css</code> (write). Only an eligible administrator activating or saving ChurchWeb Connector settings receives the additional clearing permission. Use client approval for the write action.</p>';
     echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
     wp_nonce_field( 'church_connector_used_css' );
     echo '<input type="hidden" name="action" value="church_connector_used_css"><p><label for="ct-scope">Scope</label> <select id="ct-scope" name="scope"><option value="page">One published page or post</option><option value="site">Whole website</option></select></p>';

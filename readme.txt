@@ -1,7 +1,7 @@
-=== Church Website Connector ===
+=== ChurchWeb Connector ===
 Requires at least: 7.0
 Requires PHP: 8.3
-Stable tag: 1.13.8
+Stable tag: 1.14.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -10,9 +10,17 @@ website configuration and tools through MCP. It protects PDFs from Imagify optim
 optional Redirection, SEO, snippet and form-design management and Used CSS clearing. Install the same ZIP on
 each compatible website; no site-specific code or ZIP rebuild is needed.
 
+== Single-page cache clearing ==
+
+ChurchWeb Connector 1.14.0 adds `church-connector/clear-page-cache` on the verified GeneratePress MCP connection. Supply the bound site address and one public URL. A website project’s standing authorisation covers a necessary single-page clear. WP Rocket 3.24.x checks the account’s permission. The tool preserves cached child pages and siblings. Check the public page after the clear.
+
+== Public discussion ==
+
+In Settings → ChurchWeb Connector, “Disable comments, pingbacks and trackbacks sitewide” is on by default. It closes new public discussion on existing and future content while keeping published comments visible. Uncheck it to resume the site’s own discussion settings.
+
 == Website configuration: Imagify PDF protection ==
 
-In Settings → Website Connector → Settings, select “Prevent Imagify from optimising PDFs” to help preserve each PDF’s own language declaration and accessibility information. Only the pdf entry is removed through Imagify’s documented imagify_get_mime_types filter. Images and other code’s exclusions are preserved. Applies to automatic uploads, bulk/manual optimisation and background workers without an MCP connection.
+In Settings → ChurchWeb Connector → Settings, select “Prevent Imagify from optimising PDFs” to help preserve each PDF’s own language declaration and accessibility information. Only the pdf entry is removed through Imagify’s documented imagify_get_mime_types filter. Images and other code’s exclusions are preserved. Applies to automatic uploads, bulk/manual optimisation and background workers without an MCP connection.
 
 On for new installations and once on upgrade when the setting is missing. Explicit disabled/enabled choices are retained on later upgrades, reactivation and site rebinding. On an upgrade from older settings, the local PDF exclusion remains active when both saved website addresses still match. Connection tools keep their separate address review. A changed address pauses protection until an administrator reviews and saves the settings. The module uses the existing settings form, permissions and nonce.
 
@@ -20,7 +28,7 @@ Requires Imagify 2.3.1+; verified against 2.3.5. Harmless when Imagify is absent
 
 Prevention only: existing PDFs keep their current contents until separately restored or replaced. No language is assigned and no document is rewritten. PDF support exclusion also affects Imagify’s displays, statistics and restore controls; native recovery may need protection temporarily off as a separate controlled task. Already running remote jobs and other PDF processors are outside this setting.
 
-The separate configuration module broadens Church Website Connector beyond MCP/REST connectivity while retaining its name, identity and update mechanism.
+The separate configuration module broadens ChurchWeb Connector beyond MCP/REST connectivity while retaining its name, identity and update mechanism.
 
 Official reference: https://imagify.io/documentation/imagify-optimization-filter-hooks/
 
@@ -28,7 +36,7 @@ Official reference: https://imagify.io/documentation/imagify-optimization-filter
 
 With the optional GeneratePress OAuth bridge enabled, use the native GeneratePress
 AI MCP server as a single primary connection for GeneratePress authoring, enabled
-Church Website Connector tools and the allowlisted WP Rocket tools. Complete the
+ChurchWeb Connector tools and the allowlisted WP Rocket tools. Complete the
 native GeneratePress sign-in and consent. A separate WP Rocket OAuth sign-in is
 not needed for those tools through this connection.
 
@@ -47,7 +55,7 @@ no route is enabled for new Codex access to the additional WordPress and plugin
 tools. GeneratePress’s own authoring remains independent. Existing authorised
 connections are not revoked by these switches.
 
-Settings > Website Connector supplies both native MCP addresses and the
+Settings > ChurchWeb Connector supplies both native MCP addresses and the
 GeneratePress authorisation-server metadata address. Its copyable setup message
 gives the next step for the installation. It asks for address confirmation or
 missing setup when needed. Once ready, it gives the selected connection and
@@ -59,7 +67,7 @@ that sign-in, client discovery or an upload has completed successfully.
 
 1. Open Plugins > Add Plugin > Upload Plugin in WordPress. Upload the ZIP and
    activate it as an administrator, or replace the installed version when updating.
-2. Open Settings > Website Connector. Resolve any missing or inactive dependencies
+2. Open Settings > ChurchWeb Connector. Resolve any missing or inactive dependencies
    shown there, including GeneratePress AI setup and licence activation.
 3. Open the connector settings to complete setup. New setups automatically
    install or activate the separate official MCP Adapter when needed. Review the
@@ -114,7 +122,7 @@ https://wordpress.org/plugins/mcp-adapter/ (slug mcp-adapter).
 No adapter code or other vendor plugin is bundled in the connector ZIP.
 
 On the Installed Plugins confirmation after single or bulk activation, or on the
-Website Connector administrator setup screen, a new setup makes one
+ChurchWeb Connector administrator setup screen, a new setup makes one
 automatic nonce-protected POST to install/activate that adapter if no compatible
 loaded adapter is available. It reuses a compatible adapter supplied elsewhere,
 or activates an already-installed compatible preferred adapter without downloading
@@ -158,7 +166,7 @@ Website policy and plugin-update permissions can prevent the initial default;
 review the status panel and Installed Plugins if it could not be enabled.
 
 
-From 1.7.1, Settings → Website Connector → Automatic updates includes Check for
+From 1.7.1, Settings → ChurchWeb Connector → Automatic updates includes Check for
 updates now. This makes a fresh GitHub check, bypassing the success/failure cache,
 and refreshes only this plugin’s WordPress update information. It does not install
 an update. Use Update now on Installed Plugins when you want to install it.
@@ -168,7 +176,7 @@ From 1.7.2, the result appears at the top of the settings page after the refresh
 
 
 Install version 1.5.0 or newer once, then open Plugins > Installed Plugins and
-review the auto-update setting for Church Website Connector. Enable it if desired on an existing installation. WordPress handles later
+review the auto-update setting for ChurchWeb Connector. Enable it if desired on an existing installation. WordPress handles later
 updates on its normal schedule, subject to hosting policy and working scheduled
 tasks. The site's administrator can disable auto-updates using the same control.
 Existing connector settings, connections and feature choices are retained.
@@ -216,7 +224,7 @@ connected account's permissions must all be checked on the intended website.
 
 == Optional SEO, snippet and form integrations (1.6.0) ==
 
-New setups select all four integrations in Settings > Website Connector. Existing
+New setups select all four integrations in Settings > ChurchWeb Connector. Existing
 websites keep their saved choices, including off choices; missing integration
 flags in older configurations remain off. Each switch remains independent. Refresh the
 connected client's tools after saving. Both the existing MCP connection and six
@@ -425,7 +433,7 @@ These tools schedule no cache clears; ordinary native update hooks still apply.
 The optional tools are redirection-capabilities, list-redirections, get-redirection,
 list-redirection-groups, preview-redirection-change, apply-redirection-change and
 discard-redirection-change, all prefixed church-connector/. Enable Redirection in
-Settings > Website Connector. Version 1.7.4 enables this helper by default only
+Settings > ChurchWeb Connector. Version 1.7.4 enables this helper by default only
 on new installations. Updates, reactivation and older saved settings preserve
 the previous choice, including off. The separate Redirection plugin is still required. Use the primary GeneratePress connection
 with the bridge enabled, or the alternative WP Rocket gateway. Native Redirection
@@ -505,7 +513,7 @@ not schedule clearing or trigger it automatically after content edits.
 When an older all-saints-used-css or church-toolkit-used-css helper is active,
 the connector waits before advertising replacement Used CSS abilities. Keep an
 administrator browser session open, deactivate the older CSS helper, then save
-Website Connector settings and verify the replacement's read-only status through
+ChurchWeb Connector settings and verify the replacement's read-only status through
 the intended connection. Retain the original ZIP and plugin until verified.
 A clearing test requires separate authorisation.
 
@@ -565,6 +573,13 @@ adds filtered rule search, exact-path log counts, group management, selected
 batches, reviewed matching defaults and portable plain-rule import/export.
 
 == Changelog ==
+
+= 1.14.0 =
+* Show ChurchWeb Connector in WordPress administration and retain the existing plugin and update identifiers.
+* Close new public comments, pingbacks and trackbacks by default. Administrators can reopen discussion on their site.
+* Set featured images on drafts with empty discussion preferences while retaining metadata approval and conflict checks.
+* Review and save an uploaded flyer, its link and a collapsed Details block in one edit. Create native Details blocks and edit their summaries.
+* Honour a website project’s standing authorisation for a single named page on its verified GeneratePress connection. WP Rocket checks the account and target.
 
 = 1.13.8 =
 
@@ -827,9 +842,9 @@ failed, blocked or interrupted setup explains the action needed. Native readines
 remains false until compatible interfaces are actually available. Other dependency
 warnings remain visible.
 
-The Diagnostic report on Settings → Website Connector has a labelled read-only
+The Diagnostic report on Settings → ChurchWeb Connector has a labelled read-only
 field and Copy diagnostic report button, with keyboard-copy fallback. The same
-report is available in Tools → Site Health → Info → Church Website Connector.
+report is available in Tools → Site Health → Info → ChurchWeb Connector.
 It contains only selected versions, readiness and helper flags, automatic-update
 policy, and release-check timestamps/outcome. Website addresses, passwords, keys,
 licence data, native error transcripts, account details, activity rows, code,

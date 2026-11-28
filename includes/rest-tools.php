@@ -183,7 +183,7 @@ function target( array $input ) {
 }
 
 /** Internal dispatch retains the authenticated user and core permission callbacks. */
-function dispatch( string $method, string $path, array $parameters = [] ) {
+function dispatch( string $method, string $path, array $parameters = [], ?\WP_REST_Request &$request = null ) {
     if ( ! in_array( $method, [ 'GET', 'POST' ], true ) || ! preg_match( '~\A/wp/v2/(posts|pages|media|categories|tags)/[1-9][0-9]*\z~', $path, $match ) ) {
         return error( 'route', 'This REST operation is outside the fixed tool allowlist.', 403 );
     }
@@ -789,6 +789,9 @@ function related_write_condition( int $id, string $kind, ?array &$date_fields = 
 		$condition .= $wpdb->prepare( " AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} WHERE meta_id = %d AND HEX(meta_value) = HEX(%s))", $row['meta_id'], $row['meta_value'] );
 	}
 	if ( 'post' !== $kind ) {
+		if ( null !== $date_fields ) {
+			$date_fields = array( 'featured_media' => (int) ( $meta[0]['meta_value'] ?? 0 ) );
+		}
 		return $condition;
 	}
 	if ( null !== $date_fields ) {
@@ -840,7 +843,24 @@ function save_metadata( array $item, array $changes, array $links, \WP_Post $bas
 	$id       = $item['id'];
 	$expected = metadata_columns( $baseline, $changes );
 	$conflict = null;
-	$guard    = static function ( $post_id, $data ) use ( $item, $changes, $links, $expected, $id, &$conflict ) {
+	$request  = null;
+	// On update, core fills an empty comment status with 'closed' and an empty ping status with the site default.
+	// Restore only those defaults before normal post-data filters run. The final prepared-value check still applies.
+	$preserve_discussion = static function ( $data, $postarr ) use ( $id, $expected, &$request ) {
+		if ( (int) ( $postarr['ID'] ?? 0 ) !== $id || ! $request || ! is_rest_metadata_write( $request ) ) {
+			return $data;
+		}
+		if ( '' === $expected['comment_status'] && '' === $postarr['comment_status'] && 'closed' === $data['comment_status'] ) {
+			$data['comment_status'] = '';
+		}
+		if ( '' === $expected['ping_status'] && '' === $postarr['ping_status'] && '' !== $data['ping_status']
+			&& get_default_comment_status( $postarr['post_type'], 'pingback' ) === $data['ping_status'] ) {
+			$data['ping_status'] = '';
+		}
+		return $data;
+	};
+
+	$guard = static function ( $post_id, $data ) use ( $item, $changes, $links, $expected, $id, &$conflict ) {
 		if ( $post_id !== $id || ! is_rest_metadata_write() ) {
 			return;
 		}
@@ -855,13 +875,14 @@ function save_metadata( array $item, array $changes, array $links, \WP_Post $bas
 		} else {
 			foreach ( array_intersect_key( $expected, $data ) as $column => $value ) {
 				if ( (string) $data[ $column ] !== $value ) {
-					$conflict = error( 'substituted', 'WordPress prepared values outside the approved edit. Read the item before retrying.', 409 );
+					$conflict = error( 'substituted', sprintf( 'WordPress prepared a different value for %s outside the approved edit. Read the item before retrying.', $column ), 409 );
 					break;
 				}
 			}
 		}
 	};
-	$related  = related_write_condition( $id, $item['kind'] );
+
+	$related = related_write_condition( $id, $item['kind'] );
 	if ( '' === $related ) {
 		return error( 'update_unverified', 'The current metadata could not be verified before saving.', 503 );
 	}
@@ -912,14 +933,21 @@ function save_metadata( array $item, array $changes, array $links, \WP_Post $bas
 	add_action( $insert_hook, $guard_related, PHP_INT_MAX, 2 );
 	$prepare_hook = 'rest_pre_insert_' . $baseline->post_type;
 	add_filter( $prepare_hook, $preserve_date, PHP_INT_MAX, 2 );
+	$preserve_empty = 'draft' === $baseline->post_status && ( '' === $expected['comment_status'] || '' === $expected['ping_status'] );
+	if ( $preserve_empty ) {
+		add_filter( 'wp_insert_post_data', $preserve_discussion, PHP_INT_MIN, 2 );
+	}
 	add_action( 'pre_post_update', $guard, PHP_INT_MAX, 2 );
 	add_filter( 'query', $veto, PHP_INT_MIN );
 	try {
-		$result = dispatch( 'POST', route( $item['kind'], $id ), $changes );
+		$result = dispatch( 'POST', route( $item['kind'], $id ), $changes, $request );
 		return $conflict ?? $result;
 	} finally {
 		remove_action( $insert_hook, $guard_related, PHP_INT_MAX );
 		remove_filter( $prepare_hook, $preserve_date, PHP_INT_MAX );
+		if ( $preserve_empty ) {
+			remove_filter( 'wp_insert_post_data', $preserve_discussion, PHP_INT_MIN );
+		}
 		remove_action( 'pre_post_update', $guard, PHP_INT_MAX );
 		remove_filter( 'query', $veto, PHP_INT_MIN );
 	}

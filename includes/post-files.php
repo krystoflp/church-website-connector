@@ -9,7 +9,7 @@ use ChurchWebsiteConnector\RestTools;
 defined( 'ABSPATH' ) || exit;
 
 /** Return byte ranges in document order, including File blocks inside groups. */
-function ranges( string $content, ?array &$references = null ): array|\WP_Error {
+function ranges( string $content, ?array &$references = null, ?array &$blocks = null ): array|\WP_Error {
 	if ( strlen( $content ) > 1024 * 1024 ) {
 		return RestTools\error( 'post_size', 'This post exceeds the 1 MiB review limit.' );
 	}
@@ -29,16 +29,34 @@ function ranges( string $content, ?array &$references = null ): array|\WP_Error 
 		if ( null !== $references && 'core/block' === $name && in_array( $type, array( 'void-block', 'block-opener' ), true ) ) {
 			$references[] = empty( $attrs['content'] ) && empty( $attrs['overrides'] ) ? ( $attrs['ref'] ?? null ) : false;
 		}
+		$number = null;
+		if ( null !== $blocks && 'block-closer' !== $type ) {
+			$number = count( $blocks ) + 1;
+			if ( $number > 1000 ) {
+				return RestTools\error( 'post_blocks', 'This page exceeds the 1000 block selection limit.' );
+			}
+			$blocks[ $number ] = array(
+				'name'   => $name,
+				'parent' => $stack ? end( $stack )[4] : 0,
+				'attrs'  => $attrs,
+				'start'  => $start,
+				'inner'  => $parser->offset,
+				'end'    => $parser->offset,
+			);
+		}
 		if ( 'void-block' === $type && 'core/file' !== $name ) {
 			continue;
 		}
 		if ( 'block-opener' === $type ) {
-			$stack[] = array( $name, $attrs, $start, $parser->offset );
+			$stack[] = array( $name, $attrs, $start, $parser->offset, $number );
 			continue;
 		}
 		$opening = array_pop( $stack );
 		if ( 'block-closer' !== $type || ( $opening[0] ?? null ) !== $name ) {
 			return RestTools\error( 'post_blocks', 'The saved block delimiters are incomplete or unsupported.' );
+		}
+		if ( null !== $blocks ) {
+			$blocks[ $opening[4] ]['end'] = $parser->offset;
 		}
 		if ( 'core/file' === $name ) {
 			$files[] = array(
@@ -277,6 +295,19 @@ function publication_targets( array $file, int $number, string $url ): array|\WP
 	return $targets;
 }
 
+/** Resolve a readable local uploads file within the connector's media review limit. */
+function reviewable_upload( int $id ): ?string {
+	$path    = get_attached_file( $id, true );
+	$uploads = wp_get_upload_dir();
+	$root    = realpath( $uploads['basedir'] );
+	$actual  = is_string( $path ) ? realpath( $path ) : false;
+	$size    = $actual && is_file( $actual ) ? wp_filesize( $actual ) : 0;
+	if ( ! $root || ! $actual || ! str_starts_with( $actual, $root . DIRECTORY_SEPARATOR ) || ! $size || $size > 50 * MB_IN_BYTES || ! is_readable( $actual ) ) {
+		return null;
+	}
+	return $actual;
+}
+
 /** Resolve a same-origin, readable PDF attachment using WordPress Media Library. */
 function attachment( int $id ): array|\WP_Error {
 	$attachment = get_post( $id );
@@ -299,12 +330,8 @@ function attachment( int $id ): array|\WP_Error {
 		return RestTools\error( 'pdf_site', 'The PDF must have a file URL on this website.' );
 	}
 
-	$path    = get_attached_file( $id, true );
-	$uploads = wp_get_upload_dir();
-	$root    = realpath( $uploads['basedir'] );
-	$actual  = is_string( $path ) ? realpath( $path ) : false;
-	$size    = $actual && is_file( $actual ) ? wp_filesize( $actual ) : 0;
-	if ( ! $root || ! $actual || ! str_starts_with( $actual, $root . DIRECTORY_SEPARATOR ) || ! $size || $size > 50 * MB_IN_BYTES || ! is_readable( $actual ) ) {
+	$actual = reviewable_upload( $id );
+	if ( ! $actual ) {
 		return RestTools\error( 'pdf_file', 'The PDF must be a readable uploads file of at most 50 MiB.' );
 	}
 	$signature = file_get_contents( $actual, false, null, 0, 5 );

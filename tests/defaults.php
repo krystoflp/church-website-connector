@@ -40,7 +40,7 @@ foreach(['manage_options','update_plugins'] as $cap){$capabilities[$cap]=false;c
 $bound=false;check(is_wp_error(D\restore_request($input))&&[$settings,$site_options]===$before,'Moved or disabled site must be reviewed first');$bound=true;
 $save_failed=true;check(is_wp_error(D\restore_request($input))&&$site_options===$before[1],'Failed settings save cannot enable updates');$save_failed=false;
 $result=D\restore_request($input);
-foreach(['enabled','compatibility','used_css','rest_tools','redirection_tools','generatepress_bridge','tsf_tools','rankmath_tools','snippets_tools','wsform_tools','imagify_pdf_protection'] as $flag){check($settings[$flag]===true,'Restore enables '.$flag);}
+foreach(['enabled','compatibility','used_css','rest_tools','redirection_tools','generatepress_bridge','tsf_tools','rankmath_tools','snippets_tools','wsform_tools','imagify_pdf_protection','disable_comments'] as $flag){check($settings[$flag]===true,'Restore enables '.$flag);}
 check($settings['codex']===false&&$settings['setup_pending']===false,'Alternative Codex trust stays disabled and deliberate setup is saved');
 check(in_array($connector,$site_options['auto_update_plugins'],true),'Website Connector itself receives automatic updates');
 check($site_options['auto_update_plugins']===['unrelated/keep.php',$connector,$blocks,$rocket],'Only listed installed plugins are added, preserving unrelated preferences');

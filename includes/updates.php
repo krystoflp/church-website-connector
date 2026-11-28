@@ -217,7 +217,7 @@ function plugin_information( $result, string $action, $args ) {
 		return new \WP_Error( 'church_connector_release_unavailable', 'Connector release information is temporarily unavailable. Try again later or visit its GitHub releases.' );
 	}
 	return (object) array(
-		'name'          => 'Church Website Connector',
+		'name'          => 'ChurchWeb Connector',
 		'slug'          => SLUG,
 		'version'       => $latest['version'],
 		'author'        => 'Church Website Toolkit',
@@ -334,7 +334,7 @@ function check_now(): array|\WP_Error {
 		return new \WP_Error( 'church_connector_update_denied', __( 'You are not allowed to check connector updates.', 'church-website-connector' ) );
 	}
 	if ( ( $_SERVER['REQUEST_METHOD'] ?? '' ) !== 'POST' ) {
-		return new \WP_Error( 'church_connector_update_request', __( 'Use the update-check button on the Website Connector settings page.', 'church-website-connector' ) );
+		return new \WP_Error( 'church_connector_update_request', __( 'Use the update-check button on the ChurchWeb Connector settings page.', 'church-website-connector' ) );
 	}
 	$nonce = isset( $_POST['_wpnonce'] ) && is_string( $_POST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_POST['_wpnonce'] ) ) : '';
 	if ( ! wp_verify_nonce( $nonce, 'church_connector_check_updates' ) ) {
@@ -421,7 +421,7 @@ function render_notice(): void {
 		switch ( $result['status'] ?? '' ) {
 			case 'available':
 				/* translators: %s: Latest connector version. */
-				$message = sprintf( __( 'Version %s is available. Open Installed Plugins and choose Update now for Church Website Connector.', 'church-website-connector' ), $version );
+				$message = sprintf( __( 'Version %s is available. Open Installed Plugins and choose Update now for ChurchWeb Connector.', 'church-website-connector' ), $version );
 				$type    = 'warning';
 				break;
 			case 'incompatible':

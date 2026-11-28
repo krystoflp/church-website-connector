@@ -8,12 +8,15 @@ use ChurchWebsiteConnector as Connector;
 
 defined( 'ABSPATH' ) || exit;
 
-/** Initialise the new setting once on existing installations, preserving every saved choice. */
+/** Add missing configuration defaults without replacing an intervening settings save. */
 function initialise(): void {
-	$saved = Connector\settings();
-	if ( 1 === ( $saved['schema'] ?? null ) && ! array_key_exists( 'imagify_pdf_protection', $saved ) ) {
-		$saved['imagify_pdf_protection'] = true;
-		update_option( Connector\SETTINGS, $saved, false );
+	$saved    = Connector\settings();
+	$defaults = array(
+		'imagify_pdf_protection' => true,
+		'disable_comments'       => true,
+	);
+	if ( 1 === ( $saved['schema'] ?? null ) && array_diff_key( $defaults, $saved ) ) {
+		Connector\save_reviewed_settings( $saved + $defaults, $saved, Connector\current_identity() );
 	}
 }
 
@@ -101,6 +104,8 @@ function pdf_protection_status(): array {
 
 /** Part of the existing nonce-protected administrator settings form. */
 function render(): void {
+	echo '<p><label for="cwc-disable-comments"><input type="checkbox" id="cwc-disable-comments" name="disable_comments" value="1" aria-describedby="cwc-discussion-help"' . checked( Connector\settings()['disable_comments'] ?? true, true, false ) . '> ' . esc_html__( 'Disable comments, pingbacks and trackbacks sitewide', 'church-website-connector' ) . '</label></p>';
+	echo '<p id="cwc-discussion-help">' . esc_html__( 'Closes new public comments and replies on existing and future content, and stops incoming and outgoing pingbacks and trackbacks. Published comments stay visible in WordPress and GeneratePress, including the classic WooCommerce reviews list. Post editor checkboxes show the saved per-post choices. Turn this off to use those choices again.', 'church-website-connector' ) . '</p>';
 	$status = pdf_protection_status();
 	echo '<p><label for="cwc-imagify-pdf"><input type="checkbox" id="cwc-imagify-pdf" name="imagify_pdf_protection" value="1" aria-describedby="cwc-imagify-pdf-help"' . checked( $status['enabled'], true, false ) . '> ' . esc_html__( 'Prevent Imagify from optimising PDFs', 'church-website-connector' ) . '</label></p>';
 	echo '<p id="cwc-imagify-pdf-help">' . esc_html__( 'Helps preserve each PDF’s language declaration and accessibility information by excluding PDFs from Imagify. Images continue to follow Imagify’s settings and other exclusions. Applies to normal WordPress activity and background processing without an MCP connection. Enabled on new installations and once on upgrade when no choice is saved. Manually switching it off is remembered on later upgrades. PDF protection continues through a same-address upgrade while the connection tools await review. A changed address requires an administrator to review and save settings.', 'church-website-connector' ) . '</p>';

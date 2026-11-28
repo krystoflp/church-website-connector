@@ -379,7 +379,7 @@ function run( string $key ) {
 			return finish( 'failed', __( 'GeneratePress AI is installed and active. ', 'church-website-connector' ) . licence_failure( $reason ), $version );
 		}
 		$auto = Connector\Maintenance\auto_status( PLUGIN_FILE );
-		return finish( 'complete', __( 'GeneratePress AI is installed and its licence is active. Reload Website Connector settings to check connection readiness. Automatic updates: ', 'church-website-connector' ) . $auto['message'], $version );
+		return finish( 'complete', __( 'GeneratePress AI is installed and its licence is active. Reload ChurchWeb Connector settings to check connection readiness. Automatic updates: ', 'church-website-connector' ) . $auto['message'], $version );
 	} catch ( \Throwable $exception ) {
 		return finish( 'failed', __( 'Setup did not finish. Check Installed Plugins and GeneratePress AI licence status before authorising another attempt. A licence registration may already have completed.', 'church-website-connector' ), $version );
 	} finally {
@@ -391,14 +391,14 @@ function run( string $key ) {
 /** Require the administrator session, permissions and action nonce for setup. */
 function admin_request( array $input ) {
 	if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) ) {
-		return error( 'method', __( 'Use the installation button in Website Connector settings.', 'church-website-connector' ), 405 );
+		return error( 'method', __( 'Use the installation button in ChurchWeb Connector settings.', 'church-website-connector' ), 405 );
 	}
 	if ( ! is_user_logged_in() || ! owner_allowed( get_current_user_id() ) ) {
 		return error( 'forbidden', __( 'An administrator with plugin installation rights must run this setup.', 'church-website-connector' ), 403 );
 	}
 	$nonce = $input['_wpnonce'] ?? null;
 	if ( ! is_string( $nonce ) || ! wp_verify_nonce( $nonce, ADMIN_ACTION ) ) {
-		return error( 'nonce', __( 'This setup page has expired. Reload Website Connector before trying again.', 'church-website-connector' ), 403 );
+		return error( 'nonce', __( 'This setup page has expired. Reload ChurchWeb Connector before trying again.', 'church-website-connector' ), 403 );
 	}
 	if ( array_diff( array_keys( $input ), array( 'action', '_wpnonce', '_wp_http_referer', 'license_key', 'cwc-gp-install-submit' ) )
 		|| ( $input['action'] ?? '' ) !== ADMIN_ACTION || ! is_string( $input['license_key'] ?? null ) ) {
