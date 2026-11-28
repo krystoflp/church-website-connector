@@ -61,7 +61,76 @@ function register(): void {
 		'before' => $date,
 		'page'   => $number,
 	);
-	$tools  = array(
+
+	$summary = $text + array(
+		'minLength' => 1,
+		'maxLength' => 300,
+	);
+	$details = $state + array(
+		'after_block'  => $index,
+		'summary'      => $summary,
+		'inner_blocks' => array(
+			'type'     => 'array',
+			'minItems' => 1,
+			'maxItems' => 50,
+			'items'    => array(
+				'type'                 => 'object',
+				'additionalProperties' => false,
+				'required'             => array( 'name', 'text' ),
+				'properties'           => array(
+					'name' => $text + array( 'enum' => array( 'core/paragraph', 'core/heading' ) ),
+					'text' => $text + array(
+						'minLength' => 1,
+						'maxLength' => 4000,
+					),
+					'url'  => $text + array( 'maxLength' => 2048 ),
+				),
+			),
+		),
+	);
+	$poster  = array(
+		'poster_id'  => $id,
+		'poster_alt' => $text + array(
+			'minLength' => 1,
+			'maxLength' => 500,
+		),
+		'poster_url' => $text + array( 'maxLength' => 2048 ),
+	);
+	$tools   = array(
+		'get-details-blocks'           => array(
+			'Find block locations for a Details edit',
+			'List saved blocks in document order, including parents, linked posters and their paired Details blocks, editable summaries and the current state_hash. Use these numbers to select the intended block.',
+			'PostDetails\get_blocks',
+			$target,
+		),
+		'preview-details-create'       => array(
+			'Preview a new collapsed native Details block',
+			'Use the latest get-details-blocks state_hash. Insert after the selected sibling, or use after_block 0 at the start. Supply plain text paragraphs or level-two headings with optional HTTP(S) links. Show the summary, body and both neighbours before apply-post-edit. Registered shortcodes are unsupported.',
+			'PostDetails\preview_create',
+			$details,
+		),
+		'preview-flyer-create'         => array(
+			'Preview a linked poster and its collapsed Details together',
+			'Use the latest get-details-blocks state_hash and after_block (0 for the start). Select a Media Library image by ID. Show the poster and a phone-width image from responsive when available, its alternative text and destination, the summary, all inner blocks and both neighbours. After approval, use apply-post-edit once.',
+			'PostDetails\preview_flyer',
+			$details + $poster,
+		),
+		'preview-flyer-poster'         => array(
+			'Preview a correction to an existing linked flyer poster',
+			'Use the latest get-details-blocks state_hash and the number of a plain linked core Image immediately before its Details. Supply the corrected Media Library image ID, alternative text or destination. Show the before and after values and the proposed poster, including a phone-width image from responsive when available, before apply-post-edit.',
+			'PostDetails\preview_poster',
+			$state + array( 'block' => $id ),
+			$poster,
+		),
+		'preview-details-summary'      => array(
+			'Preview changing one native Details summary',
+			'Use the latest get-details-blocks number and state_hash. Replace the selected summary wording, preserving the inner blocks and saved settings. Review the before and after wording before apply-post-edit.',
+			'PostDetails\preview_summary',
+			$state + array(
+				'block'   => $id,
+				'summary' => $summary,
+			),
+		),
 		'search-media-library'         => array(
 			'Search editable Media Library attachments',
 			'Find attachments by title or filename, exact MIME type such as application/pdf, or site-local upload dates. Returns exact IDs and URLs, 20 results per page.',

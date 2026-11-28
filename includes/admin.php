@@ -6,7 +6,7 @@ namespace ChurchWebsiteConnector;
 defined( 'ABSPATH' ) || exit;
 
 function admin_menu(): void {
-	$page = add_options_page( 'Website Connector', 'Website Connector', 'manage_options', 'church-website-connector', __NAMESPACE__ . '\\admin_page' );
+	$page = add_options_page( 'ChurchWeb Connector', 'ChurchWeb Connector', 'manage_options', 'church-website-connector', __NAMESPACE__ . '\\admin_page' );
 	if ( $page ) {
 		add_action( 'load-' . $page, __NAMESPACE__ . '\\Updates\\check_on_settings_load' );
 	}
@@ -26,7 +26,7 @@ function dependency_issues(): array {
 	$issues = array();
 	if ( ! defined( 'GENERATEPRESS_AI_VERSION' ) || ! class_exists( '\GeneratePress_AI_MCP' ) ) {
 		$issues['generatepress_ai'] = array(
-			'message' => 'GeneratePress AI setup needs an administrator. Unattended connector updates do not install it or access 1Password. Open Website Connector to authorise setup, or review the existing GeneratePress AI licence.',
+			'message' => 'GeneratePress AI setup needs an administrator. Unattended connector updates do not install it or access 1Password. Open ChurchWeb Connector to authorise setup, or review the existing GeneratePress AI licence.',
 			'url'     => admin_url( 'options-general.php?page=church-website-connector#cwc-gp-setup' ),
 			'action'  => 'Open GeneratePress AI setup',
 		);
@@ -122,17 +122,17 @@ function dependency_notice(): void {
 	if ( isset( $issues['wp_rocket'] ) ) {
 		if ( ! rocket_notice_dismissed() ) {
 			$rocket = $issues['wp_rocket'];
-			echo '<div class="notice notice-warning is-dismissible" id="cwc-rocket-notice" data-url="' . esc_url( admin_url( 'admin-ajax.php' ) ) . '" data-nonce="' . esc_attr( wp_create_nonce( ROCKET_NOTICE ) ) . '"><p><strong>Website Connector needs setup</strong></p><p>' . esc_html( $rocket['message'] ) . ' <a href="' . esc_url( $rocket['url'] ) . '">' . esc_html( $rocket['action'] ) . '</a></p><p>' . esc_html__( 'WP Rocket is optional for the primary GeneratePress connection. Dismiss this warning for your account on this website if its absence is intentional.', 'church-website-connector' ) . '</p></div>';
+			echo '<div class="notice notice-warning is-dismissible" id="cwc-rocket-notice" data-url="' . esc_url( admin_url( 'admin-ajax.php' ) ) . '" data-nonce="' . esc_attr( wp_create_nonce( ROCKET_NOTICE ) ) . '"><p><strong>ChurchWeb Connector needs setup</strong></p><p>' . esc_html( $rocket['message'] ) . ' <a href="' . esc_url( $rocket['url'] ) . '">' . esc_html( $rocket['action'] ) . '</a></p><p>' . esc_html__( 'WP Rocket is optional for the primary GeneratePress connection. Dismiss this warning for your account on this website if its absence is intentional.', 'church-website-connector' ) . '</p></div>';
 		}
 		unset( $issues['wp_rocket'] );
 	}
 	if ( ! $issues ) {
 		return; }
-	echo '<div class="notice notice-warning"><p><strong>Website Connector needs setup</strong></p><ul>';
+	echo '<div class="notice notice-warning"><p><strong>ChurchWeb Connector needs setup</strong></p><ul>';
 	foreach ( $issues as $issue ) {
 		echo '<li>' . esc_html( $issue['message'] ) . ' <a' . ( 'Open GeneratePress AI setup' === $issue['action'] ? ' class="button button-primary"' : '' ) . ' href="' . esc_url( $issue['url'] ) . '">' . esc_html( $issue['action'] ) . '</a></li>';
 	}
-	echo '</ul><p><a href="' . esc_url( admin_url( 'options-general.php?page=church-website-connector' ) ) . '">Open Website Connector</a></p></div>';
+	echo '</ul><p><a href="' . esc_url( admin_url( 'options-general.php?page=church-website-connector' ) ) . '">Open ChurchWeb Connector</a></p></div>';
 }
 
 function connection_details(): array {
@@ -183,6 +183,7 @@ function connection_status( $input = array() ) {
 			'current_user_can_upload' => ! is_wp_error( PdfUpload\permission() ),
 			'max_bytes'               => min( PdfUpload\MAX_BYTES, wp_max_upload_size() ),
 		),
+		'public_discussion_disabled'      => feature_enabled( 'disable_comments' ),
 		'imagify_pdf_protection'          => Configuration\pdf_protection_status(),
 		'generatepress_oauth_bridge'      => GeneratePressBridge\status(),
 		'primary_connection'              => Maintenance\primary_connection(),
@@ -233,7 +234,7 @@ function register_status_ability(): void {
 	wp_register_ability(
 		'church-connector/connection-status',
 		array(
-			'label'               => 'Website Connector status',
+			'label'               => 'ChurchWeb Connector status',
 			'description'         => 'Read website identity, readiness, connector automatic-update policy and recorded GitHub check times. Requires a bound website and an administrator.',
 			'category'            => 'church-connector',
 			'input_schema'        => array(
@@ -260,7 +261,7 @@ function register_category(): void {
 		wp_register_ability_category(
 			'church-connector',
 			array(
-				'label'       => 'Website Connector',
+				'label'       => 'ChurchWeb Connector',
 				'description' => 'Connection readiness, protected cache operations and REST-backed metadata tools.',
 			)
 		);
@@ -315,13 +316,13 @@ function admin_save(): void {
 		$flags  = is_array( $stored ) ? $stored : array();
 		$action = rebind_action( $flags, current_identity() );
 		if ( '' === $action ) {
-			wp_die( 'Reload Website Connector settings to review the current address.', '', array( 'response' => 409 ) );
+			wp_die( 'Reload ChurchWeb Connector settings to review the current address.', '', array( 'response' => 409 ) );
 		}
 		check_admin_referer( $action, 'church_connector_rebind_nonce' );
 	} else {
 		$submitted_review = isset( $_POST['church_connector_review'] ) && is_string( $_POST['church_connector_review'] ) ? sanitize_text_field( wp_unslash( $_POST['church_connector_review'] ) ) : $review;
 		if ( ! preg_match( '/\Achurch_connector_save_[a-f0-9]{64}\z/', $submitted_review ) ) {
-			wp_die( 'Reload Website Connector settings to review the current choices.', '', array( 'response' => 403 ) );
+			wp_die( 'Reload ChurchWeb Connector settings to review the current choices.', '', array( 'response' => 403 ) );
 		}
 		check_admin_referer( $submitted_review );
 		$review = $submitted_review;
@@ -329,7 +330,7 @@ function admin_save(): void {
 			'enabled'       => true,
 			'setup_pending' => false,
 		);
-		foreach ( array( 'compatibility', 'codex', 'used_css', 'rest_tools', 'redirection_tools', 'generatepress_bridge', 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools', 'imagify_pdf_protection' ) as $key ) {
+		foreach ( array( 'compatibility', 'codex', 'used_css', 'rest_tools', 'redirection_tools', 'generatepress_bridge', 'tsf_tools', 'rankmath_tools', 'snippets_tools', 'wsform_tools', 'imagify_pdf_protection', 'disable_comments' ) as $key ) {
 			$flags[ $key ] = isset( $_POST[ $key ] ) && '1' === $_POST[ $key ];
 		}
 	}
@@ -337,7 +338,7 @@ function admin_save(): void {
 	if ( is_wp_error( $result ) ) {
 		wp_die(
 			esc_html( $result->get_error_message() ),
-			'Website Connector',
+			'ChurchWeb Connector',
 			array(
 				'response'  => $result->get_error_data()['status'] ?? 400,
 				'back_link' => true,
@@ -358,14 +359,14 @@ function setup_prompt( array $status ): string {
 	$route  = $status['primary_connection'];
 	$deps   = $status['dependencies'];
 	$urls   = $status['connections'];
-	$intro  = 'Church Website Connector ' . VERSION . ' on ' . $status['current_site_url'] . ".\n";
+	$intro  = 'ChurchWeb Connector ' . VERSION . ' on ' . $status['current_site_url'] . ".\n";
 	$intro .= "Codex desktop is the tested client. ChatGPT web support is unverified. Keep passwords, tokens and licence keys out of chat.\n\n";
 
 	if ( 'website_review_required' === $route['state'] ) {
-		return $intro . 'The connector is paused for website review. Ask the administrator to open Settings > Website Connector and check both the Site Address and WordPress Address against the intended installation. If both are correct, use “Confirm this address and keep my settings” when offered, or review and save the settings on that page. If either address is unexpected, stop and report the mismatch. Then copy the updated message.';
+		return $intro . 'The connector is paused for website review. Ask the administrator to open Settings > ChurchWeb Connector and check both the Site Address and WordPress Address against the intended installation. If both are correct, use “Confirm this address and keep my settings” when offered, or review and save the settings on that page. If either address is unexpected, stop and report the mismatch. Then copy the updated message.';
 	}
 	if ( 'connections_disabled' === $route['state'] ) {
-		return $intro . 'Both connection options are disabled. Before attempting new Codex access to the additional tools, ask whether the administrator wants to enable the single GeneratePress connection or the alternative WP Rocket connection in Settings > Website Connector. GeneratePress authoring is independent. Existing authorised connections are not revoked. After a change, copy the updated message.';
+		return $intro . 'Both connection options are disabled. Before attempting new Codex access to the additional tools, ask whether the administrator wants to enable the single GeneratePress connection or the alternative WP Rocket connection in Settings > ChurchWeb Connector. GeneratePress authoring is independent. Existing authorised connections are not revoked. After a change, copy the updated message.';
 	}
 	$primary = 'generatepress' === $route['selected'];
 	if ( 'setup_required' === $route['state'] ) {
@@ -385,7 +386,7 @@ function setup_prompt( array $status ): string {
 				default => 'Complete setup of a compatible MCP Adapter for WP Rocket.',
 			};
 		}
-		return $intro . 'The selected ' . ( $primary ? 'GeneratePress' : 'WP Rocket' ) . ' connection needs setup. ' . $step . ' Ask the administrator to check Settings > Website Connector, resolve the indicated issue, then copy the updated message. Keep the selected connection method.';
+		return $intro . 'The selected ' . ( $primary ? 'GeneratePress' : 'WP Rocket' ) . ' connection needs setup. ' . $step . ' Ask the administrator to check Settings > ChurchWeb Connector, resolve the indicated issue, then copy the updated message. Keep the selected connection method.';
 	}
 
 	if ( $primary ) {
@@ -410,7 +411,7 @@ function admin_page(): void {
 	$mcp_disabled    = 'none' === $status['primary_connection']['selected'];
 	$pdf_limit       = rtrim( rtrim( number_format( $status['pdf_upload']['max_bytes'] / 1048576, 2, '.', '' ), '0' ), '.' ) . ' MiB';
 
-	echo '<div class="wrap"><h1>Website Connector</h1>';
+	echo '<div class="wrap"><h1>ChurchWeb Connector</h1>';
 	Updates\render_notice();
 	Defaults\render_notice();
 	GeneratePressSetup\render_callout( $status );
@@ -436,7 +437,7 @@ function admin_page(): void {
 		echo '<div class="notice notice-warning" data-cwc-mcp-warning><p><strong>' . esc_html__( 'WordPress and plugin tools through MCP need a connection', 'church-website-connector' ) . '</strong></p><p>' . esc_html( $status['primary_connection']['message'] ) . ' <a href="#cwc-settings-title">' . esc_html__( 'Choose a connection in Settings', 'church-website-connector' ) . '</a></p></div>';
 	} elseif ( $bridge_selected ) {
 		echo $bridge_ready
-			? '<p><strong>Current setup:</strong> A single primary GeneratePress connection provides GeneratePress authoring, the enabled Website Connector features and WP Rocket tools. A separate WP Rocket sign-in is not needed for these tools.</p>'
+			? '<p><strong>Current setup:</strong> A single primary GeneratePress connection provides GeneratePress authoring, the enabled ChurchWeb Connector features and WP Rocket tools. A separate WP Rocket sign-in is not needed for these tools.</p>'
 			: '<p><strong>Current setup:</strong> GeneratePress is selected as the primary connection. Complete its setup or resolve the compatibility or website warning below before using the extra tools. The selection has not changed to separate connections.</p>';
 	} else {
 		echo '<p><strong>Current setup:</strong> ' . esc_html( $status['primary_connection']['message'] ) . ( 'green' !== $status['primary_connection']['level'] ? ' ' . esc_html__( 'Complete the WP Rocket and MCP Adapter setup shown in Status before using that connection.', 'church-website-connector' ) : '' ) . '</p>';
@@ -451,7 +452,7 @@ function admin_page(): void {
 	$review = settings_review_action( $stored, $review_identity );
 	wp_nonce_field( $review );
 	echo '<input type="hidden" name="church_connector_review" value="' . esc_attr( $review ) . '">';
-	echo '<input type="hidden" name="action" value="church_connector_save"><fieldset><legend class="screen-reader-text">Website settings and PDF protection</legend>';
+	echo '<input type="hidden" name="action" value="church_connector_save"><fieldset><legend class="screen-reader-text">ChurchWeb Connector settings</legend>';
 	$options = array(
 		'compatibility'        => 'Keep GeneratePress and WP Rocket sign-in discovery compatible',
 		'codex'                => 'Allow official Codex sign-in through the alternative WP Rocket connection',
@@ -484,7 +485,7 @@ function admin_page(): void {
 	field( 'cwc-rocket-url', $mcp_disabled ? 'WP Rocket MCP server — Codex sign-in option is disabled' : ( $bridge_selected ? 'Alternative WP Rocket MCP server' : 'WP Rocket MCP server (separate connection)' ), $urls['wp_rocket_mcp'] );
 	echo '<p><label for="cwc-setup-prompt"><strong>Copy this message into your website project chat</strong></label></p><textarea class="large-text" id="cwc-setup-prompt" rows="12" readonly>' . esc_textarea( setup_prompt( $status ) ) . '</textarea>';
 	echo '<p>The tested client is native Codex desktop. The Codex trust helper above applies to the separate WP Rocket route; the primary connection uses GeneratePress’s native sign-in. Other clients must support the selected provider’s OAuth flow. This page checks local readiness, not completed sign-in, tool discovery or a successful upload.</p>';
-	echo '<h2 id="cwc-update-check">Automatic updates</h2><p>Updates are available from the connector’s published GitHub releases. To receive them automatically, open <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Installed Plugins</a> and review the auto-update setting for Church Website Connector. New installations select it once when website policy permits. Your website’s update policy and schedule apply.</p>';
+	echo '<h2 id="cwc-update-check">Automatic updates</h2><p>Updates are available from the connector’s published GitHub releases. To receive them automatically, open <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Installed Plugins</a> and review the auto-update setting for ChurchWeb Connector. New installations select it once when website policy permits. Your website’s update policy and schedule apply.</p>';
 	Updates\render_check();
 	echo '<h2>Optional plugin integrations</h2><p>The SEO Framework, Rank Math, Code Snippets and WS Form Pro each have a separate switch above. New setups select all four; missing or incompatible plugins leave their helper waiting. Both SEO switches can stay selected when the website uses only one SEO plugin. Updates preserve existing choices. After changing a switch or activating its plugin, refresh your connection and start with integration-capabilities. Read the item, review a preview, then apply only after approval. Code-executing changes require a separate acknowledgement. WS Form tools cover form design and selected settings; submission records and notification credentials are excluded.</p>';
 	echo '<h2>Page, post and media details</h2><p>Use the selected website connection to inspect supported details, featured images, categories and existing media descriptions or alt text. Changes to existing details require a reviewed preview belonging to the signed-in account, and are rejected if the item changed. GeneratePress handles block content and draft authoring. WordPress permissions still apply; no separate REST connection or password is needed.</p>';

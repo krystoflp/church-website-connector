@@ -56,7 +56,7 @@ function status( string $provider ): array {
 function ready( string $provider ) {
     if ( ! isset( FLAGS[ $provider ] ) ) { return error( 'provider', 'Choose one of the four documented integrations.' ); }
     $s = status( $provider );
-    if ( ! $s['enabled'] ) { return error( 'disabled', 'Enable this integration separately in Settings > Website Connector.', 403 ); }
+    if ( ! $s['enabled'] ) { return error( 'disabled', 'Enable this integration separately in Settings > ChurchWeb Connector.', 403 ); }
     if ( ! $s['compatible'] ) { return error( 'unavailable', $s['label'] . ' requires its supported version and native interfaces. See integration-capabilities.', 503 ); }
     return true;
 }
