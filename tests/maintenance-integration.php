@@ -82,6 +82,12 @@ $history=M\recent_changes();maintenance_check(count($history)===50&&$history[0][
 $network=static function(){throw new RuntimeException('Dashboard must not make an external request');};add_filter('pre_http_request',$network,100);
 $settings=C\settings();$roles=wp_roles()->roles;$before_updates=get_site_option('auto_update_plugins');
 ob_start();C\admin_page();$html=ob_get_clean();
+maintenance_check(
+	preg_match( '~<th scope="row">Installed connector</th><td>(.*?)</td>~s', $html, $installed_row )
+		&& str_contains( wp_strip_all_tags( $installed_row[1] ), C\VERSION )
+		&& ! str_contains( wp_strip_all_tags( $html ), 'Plugin version:' ),
+	'Settings shows the installed version in Connector status without the separate Plugin version paragraph'
+);
 maintenance_check(strpos($html,'id="cwc-gp-setup"')<strpos($html,'id="cwc-summary"')&&strpos($html,'Install and activate GeneratePress AI')<strpos($html,'id="cwc-status-title"'),'Licence field and installation action appear at the top before the summary and plugin table');
 maintenance_check(!str_contains($html,'Authorise setup from my Mac')&&!str_contains($html,'Optional: use the existing Mac helper')&&!str_contains($html,'cwc-gp-helper-submit'),'Only the browser licence form is offered; the helper controls are absent');
 preg_match('~<form id="cwc-gp-install-form".*?</form>~s',$html,$browser_form);
